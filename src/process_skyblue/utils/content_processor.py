@@ -109,17 +109,21 @@ class ContentProcessor:
     
     def clean_content(self, content: str) -> str:
         """
-        Clean content by removing extra whitespace and normalizing.
-        
+        Clean content by removing extra whitespace while preserving newlines.
+
         Args:
             content: Content to clean
-            
+
         Returns:
             Cleaned content
         """
-        # Remove extra whitespace and normalize
-        cleaned = re.sub(r'\s+', ' ', content.strip())
-        return cleaned
+        # Collapse multiple spaces/tabs within each line (but keep newlines)
+        lines = content.split('\n')
+        cleaned_lines = [re.sub(r'[^\S\n]+', ' ', line).strip() for line in lines]
+        result = '\n'.join(cleaned_lines)
+        # Collapse 3+ consecutive newlines into 2
+        result = re.sub(r'\n{3,}', '\n\n', result)
+        return result.strip()
     
     def process_for_x(self, content: str) -> str:
         """

@@ -52,13 +52,32 @@ class TestContentProcessor:
         assert not result[:-3].endswith(" that")
     
     def test_clean_content_removes_extra_whitespace(self):
-        """Test content cleaning removes extra whitespace."""
+        """Test content cleaning collapses spaces but preserves newlines."""
         processor = ContentProcessor()
         content = "  Multiple   spaces    and\n\nnewlines  "
-        
+
         result = processor.clean_content(content)
-        
-        assert result == "Multiple spaces and newlines"
+
+        # Newlines should be preserved; only extra spaces collapsed
+        assert result == "Multiple spaces and\n\nnewlines"
+
+    def test_clean_content_preserves_newlines(self):
+        """Test that clean_content does not strip line breaks."""
+        processor = ContentProcessor()
+        content = "Line 1\nLine 2\nLine 3"
+
+        result = processor.clean_content(content)
+
+        assert result == "Line 1\nLine 2\nLine 3"
+
+    def test_clean_content_collapses_excess_newlines(self):
+        """Test that 3+ consecutive newlines are collapsed to 2."""
+        processor = ContentProcessor()
+        content = "Paragraph 1\n\n\n\nParagraph 2"
+
+        result = processor.clean_content(content)
+
+        assert result == "Paragraph 1\n\nParagraph 2"
     
     def test_clean_content_handles_unicode(self):
         """Test content cleaning handles Unicode characters."""
