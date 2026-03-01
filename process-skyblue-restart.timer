@@ -1,0 +1,10 @@
+[Unit]
+Description=Daily restart timer for Process SkyBlue
+
+[Timer]
+OnCalendar=daily
+Persistent=true
+Unit=process-skyblue-restart.service
+
+[Install]
+WantedBy=timers.target

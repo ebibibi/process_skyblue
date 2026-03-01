@@ -1,0 +1,13 @@
+[Unit]
+Description=Process SkyBlue Update Checker Timer
+
+[Timer]
+# 5分ごとにチェック
+OnBootSec=1min
+OnUnitActiveSec=5min
+# サーバー停止中に逃した実行を次回起動時に補う
+Persistent=true
+Unit=process-skyblue-updater.service
+
+[Install]
+WantedBy=timers.target

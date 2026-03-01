@@ -1,0 +1,31 @@
+[Unit]
+Description=Process SkyBlue - Bluesky to X Cross-poster
+# network-online.target で実際にネットワーク疎通可能になるまで待機
+Wants=network-online.target
+After=network-online.target docker.service
+Requires=docker.service
+
+[Service]
+Type=simple
+# 実行ユーザーを環境に合わせて変更してください
+User=your-username
+# リポジトリのクローン先に合わせて変更してください
+WorkingDirectory=/path/to/process_skyblue
+# 残骸コンテナがあれば削除（異常終了時の名前衝突対策）
+# - を付けることで失敗してもサービス起動を継続
+ExecStartPre=-/usr/bin/docker rm -f process-skyblue
+ExecStart=/usr/bin/docker run --rm --name process-skyblue \
+    --env-file /path/to/process_skyblue/.env \
+    -v /path/to/process_skyblue/data:/app/data \
+    process-skyblue
+ExecStop=-/usr/bin/docker stop process-skyblue
+Restart=always
+RestartSec=30
+
+# ログ設定
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=process-skyblue
+
+[Install]
+WantedBy=multi-user.target

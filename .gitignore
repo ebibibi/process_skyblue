@@ -1,0 +1,18 @@
+# Python cache files
+*.pyc
+**/__pycache__/
+
+# Test artifacts
+.coverage
+pytest.ini
+
+# Runtime state
+data/state.json
+
+# Secrets - NEVER commit this file
+.env
+
+# Editor and OS
+.DS_Store
+.vscode/
+*.swp
