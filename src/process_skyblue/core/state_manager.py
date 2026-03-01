@@ -13,7 +13,7 @@ from typing import Optional
 class StateManager:
     """Manages application state persistence."""
 
-    ALL_DESTINATIONS = ["x", "discord_ebilog"]
+    ALL_DESTINATIONS = ["x", "discord_log"]
 
     def __init__(self, state_file_path: str = "data/state.json"):
         """
@@ -29,9 +29,9 @@ class StateManager:
         self.failed_posts: dict = {}  # Failed posts with retry counts: {post_id: {"count": N, "timestamp": str, "last_error": str}}
         self.permanently_failed_posts: list = []  # Posts that exceeded max retries
         self.post_id_mapping: dict = {}  # Bluesky post ID -> Twitter tweet ID mapping for threading
-        self.completed_destinations: dict = {}  # {post_id: ["x", "discord_ebilog"]}
-        self.discord_ebilog_failed_posts: dict = {}  # Same structure as failed_posts
-        self.discord_ebilog_permanently_failed_posts: list = []  # Same structure as permanently_failed_posts
+        self.completed_destinations: dict = {}  # {post_id: ["x", "discord_log"]}
+        self.discord_log_failed_posts: dict = {}  # Same structure as failed_posts
+        self.discord_log_permanently_failed_posts: list = []  # Same structure as permanently_failed_posts
         self.max_cache_size = 1000  # Keep last 1000 post IDs
         self.max_retry_count = 3  # Max retries before marking as permanently failed
         self._load_state()
@@ -49,9 +49,9 @@ class StateManager:
                     self.permanently_failed_posts = state_data.get('permanently_failed_posts', [])
                     self.post_id_mapping = state_data.get('post_id_mapping', {})
                     self.completed_destinations = state_data.get('completed_destinations', {})
-                    self.discord_ebilog_failed_posts = state_data.get('discord_ebilog_failed_posts', {})
-                    self.discord_ebilog_permanently_failed_posts = state_data.get(
-                        'discord_ebilog_permanently_failed_posts', []
+                    self.discord_log_failed_posts = state_data.get('discord_log_failed_posts', {})
+                    self.discord_log_permanently_failed_posts = state_data.get(
+                        'discord_log_permanently_failed_posts', []
                     )
 
                     # Backward compatibility: posts in processed_posts_cache
@@ -110,8 +110,8 @@ class StateManager:
             'permanently_failed_posts': self.permanently_failed_posts,
             'post_id_mapping': self.post_id_mapping,
             'completed_destinations': self.completed_destinations,
-            'discord_ebilog_failed_posts': self.discord_ebilog_failed_posts,
-            'discord_ebilog_permanently_failed_posts': self.discord_ebilog_permanently_failed_posts,
+            'discord_log_failed_posts': self.discord_log_failed_posts,
+            'discord_log_permanently_failed_posts': self.discord_log_permanently_failed_posts,
         }
 
         with open(self.state_file_path, 'w', encoding='utf-8') as f:
@@ -401,53 +401,53 @@ class StateManager:
         completed = self.completed_destinations.get(post_id, [])
         return all(d in completed for d in self.ALL_DESTINATIONS)
 
-    def add_discord_ebilog_failed_post(self, post_id: str, timestamp: str, error: str) -> bool:
+    def add_discord_log_failed_post(self, post_id: str, timestamp: str, error: str) -> bool:
         """
         Add or update a Discord ebilog failed post with retry count.
 
         Returns:
             True if post exceeded max retries and was moved to permanently_failed
         """
-        if post_id in self.discord_ebilog_failed_posts:
-            self.discord_ebilog_failed_posts[post_id]["count"] += 1
-            self.discord_ebilog_failed_posts[post_id]["last_error"] = error
+        if post_id in self.discord_log_failed_posts:
+            self.discord_log_failed_posts[post_id]["count"] += 1
+            self.discord_log_failed_posts[post_id]["last_error"] = error
         else:
-            self.discord_ebilog_failed_posts[post_id] = {
+            self.discord_log_failed_posts[post_id] = {
                 "count": 1,
                 "timestamp": timestamp,
                 "last_error": error,
             }
 
-        if self.discord_ebilog_failed_posts[post_id]["count"] >= self.max_retry_count:
-            self.discord_ebilog_permanently_failed_posts.append({
+        if self.discord_log_failed_posts[post_id]["count"] >= self.max_retry_count:
+            self.discord_log_permanently_failed_posts.append({
                 "post_id": post_id,
                 "timestamp": timestamp,
                 "last_error": error,
                 "failed_at": datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z'),
             })
-            del self.discord_ebilog_failed_posts[post_id]
+            del self.discord_log_failed_posts[post_id]
             self._save_state()
             return True
 
         self._save_state()
         return False
 
-    def is_discord_ebilog_failed(self, post_id: str) -> bool:
+    def is_discord_log_failed(self, post_id: str) -> bool:
         """Check if a post is in the Discord ebilog failed queue."""
-        return post_id in self.discord_ebilog_failed_posts
+        return post_id in self.discord_log_failed_posts
 
-    def is_discord_ebilog_permanently_failed(self, post_id: str) -> bool:
+    def is_discord_log_permanently_failed(self, post_id: str) -> bool:
         """Check if a post has permanently failed for Discord ebilog."""
-        return any(p["post_id"] == post_id for p in self.discord_ebilog_permanently_failed_posts)
+        return any(p["post_id"] == post_id for p in self.discord_log_permanently_failed_posts)
 
-    def remove_from_discord_ebilog_failed(self, post_id: str) -> None:
+    def remove_from_discord_log_failed(self, post_id: str) -> None:
         """Remove a post from the Discord ebilog failed queue."""
-        if post_id in self.discord_ebilog_failed_posts:
-            del self.discord_ebilog_failed_posts[post_id]
+        if post_id in self.discord_log_failed_posts:
+            del self.discord_log_failed_posts[post_id]
             self._save_state()
 
-    def get_discord_ebilog_failed_count(self, post_id: str) -> int:
+    def get_discord_log_failed_count(self, post_id: str) -> int:
         """Get the retry count for a Discord ebilog failed post."""
-        if post_id in self.discord_ebilog_failed_posts:
-            return self.discord_ebilog_failed_posts[post_id]["count"]
+        if post_id in self.discord_log_failed_posts:
+            return self.discord_log_failed_posts[post_id]["count"]
         return 0

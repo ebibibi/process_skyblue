@@ -18,34 +18,34 @@ class TestContentProcessor:
         assert result == "Short post"
     
     def test_truncate_exactly_280_chars(self):
-        """Test content that is exactly 280 characters."""
-        processor = ContentProcessor()
+        """Test content that is exactly 280 characters (Free mode limit)."""
+        processor = ContentProcessor(x_premium=False)
         content = "A" * 280
-        
+
         result = processor.truncate_for_x(content)
-        
+
         assert result == content
         assert len(result) == 280
-    
+
     def test_truncate_over_280_chars(self):
-        """Test content over 280 characters gets truncated with ellipsis."""
-        processor = ContentProcessor()
+        """Test content over 280 characters gets truncated with ellipsis in Free mode."""
+        processor = ContentProcessor(x_premium=False)
         content = "A" * 300  # 300 characters
-        
+
         result = processor.truncate_for_x(content)
-        
+
         assert result.endswith("...")
         assert len(result) == 280
         assert result == "A" * 277 + "..."
-    
+
     def test_truncate_with_word_boundary(self):
-        """Test truncation respects word boundaries when possible."""
-        processor = ContentProcessor()
+        """Test truncation respects word boundaries when possible (Free mode)."""
+        processor = ContentProcessor(x_premium=False)
         # 290 characters with words
         content = "This is a long post " * 14 + "that exceeds"
-        
+
         result = processor.truncate_for_x(content, respect_word_boundary=True)
-        
+
         assert result.endswith("...")
         assert len(result) <= 280
         # Should not cut in middle of word
@@ -70,13 +70,13 @@ class TestContentProcessor:
         assert result == content  # Should remain unchanged
     
     def test_process_for_x_complete_workflow(self):
-        """Test complete processing workflow for X posting."""
-        processor = ContentProcessor()
+        """Test complete processing workflow for X posting (Free mode)."""
+        processor = ContentProcessor(x_premium=False)
         # Long content with extra whitespace
         content = "  This is a very long post   " + "with lots of content " * 20
-        
+
         result = processor.process_for_x(content)
-        
+
         # Should be cleaned and truncated
         assert not result.startswith(" ")
         assert not result.endswith(" ")

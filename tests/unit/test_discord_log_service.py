@@ -1,16 +1,16 @@
 """
-Tests for DiscordEbilogService.
+Tests for DiscordLogService.
 """
 import pytest
 from unittest.mock import patch, MagicMock
-from process_skyblue.services.discord_ebilog_service import DiscordEbilogService
+from process_skyblue.services.discord_log_service import DiscordLogService
 
 
-class TestDiscordEbilogService:
-    """Test cases for DiscordEbilogService."""
+class TestDiscordLogService:
+    """Test cases for DiscordLogService."""
 
     def setup_method(self):
-        self.service = DiscordEbilogService(
+        self.service = DiscordLogService(
             webhook_url="https://discordapp.com/api/webhooks/test/token"
         )
 
@@ -21,9 +21,9 @@ class TestDiscordEbilogService:
         self.service.disconnect()  # Should not raise
 
     def test_get_service_name(self):
-        assert self.service.get_service_name() == "DiscordEbilogService"
+        assert self.service.get_service_name() == "DiscordLogService"
 
-    @patch("process_skyblue.services.discord_ebilog_service.requests.post")
+    @patch("process_skyblue.services.discord_log_service.requests.post")
     def test_post_content_success(self, mock_post):
         mock_response = MagicMock()
         mock_response.status_code = 204
@@ -38,7 +38,7 @@ class TestDiscordEbilogService:
         assert payload["username"] == "BlueSkyBot"
         assert payload["content"] == "Hello from BlueSky!"
 
-    @patch("process_skyblue.services.discord_ebilog_service.requests.post")
+    @patch("process_skyblue.services.discord_log_service.requests.post")
     def test_post_content_failure(self, mock_post):
         mock_response = MagicMock()
         mock_response.status_code = 400
@@ -50,7 +50,7 @@ class TestDiscordEbilogService:
         assert result["success"] is False
         assert "400" in result["error"]
 
-    @patch("process_skyblue.services.discord_ebilog_service.requests.post")
+    @patch("process_skyblue.services.discord_log_service.requests.post")
     def test_post_content_network_error(self, mock_post):
         import requests
         mock_post.side_effect = requests.RequestException("Connection refused")

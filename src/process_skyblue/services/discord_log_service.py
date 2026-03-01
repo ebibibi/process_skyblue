@@ -1,15 +1,15 @@
 """
-Discord Ebilog Output Service for Process SkyBlue.
+Discord Log Output Service for Process SkyBlue.
 
-Posts BlueSky content to the Discord えびログ channel via webhook.
+Posts BlueSky content to a Discord channel via webhook.
 """
 import requests
 from typing import Dict, Any, Optional
 from process_skyblue.services.base_output_service import BaseOutputService
 
 
-class DiscordEbilogService(BaseOutputService):
-    """Posts BlueSky content to Discord えびログ channel."""
+class DiscordLogService(BaseOutputService):
+    """Posts BlueSky content to a Discord channel via webhook."""
 
     BLUESKY_AVATAR_URL = "https://bsky.app/static/apple-touch-icon.png"
 

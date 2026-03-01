@@ -22,7 +22,7 @@ class Config(BaseModel):
     x_oauth2_client_id: Optional[str] = None
     x_oauth2_client_secret: Optional[str] = None
     discord_webhook_url: str
-    discord_ebilog_webhook_url: Optional[str] = None
+    discord_log_webhook_url: Optional[str] = None
     polling_interval: int = 60
     x_premium: bool = True
 
@@ -45,15 +45,15 @@ class Config(BaseModel):
             raise ValueError('Invalid Discord webhook URL format')
         return v
 
-    @field_validator('discord_ebilog_webhook_url')
+    @field_validator('discord_log_webhook_url')
     @classmethod
-    def validate_ebilog_webhook_url(cls, v):
-        """Validate Discord ebilog webhook URL format."""
+    def validate_log_webhook_url(cls, v):
+        """Validate Discord log webhook URL format."""
         if v is not None and not (
             v.startswith('https://discord.com/api/webhooks/')
             or v.startswith('https://discordapp.com/api/webhooks/')
         ):
-            raise ValueError('Invalid Discord ebilog webhook URL format')
+            raise ValueError('Invalid Discord log webhook URL format')
         return v
 
 
@@ -88,7 +88,7 @@ class ConfigManager:
                 x_oauth2_client_id=os.getenv('X_OAUTH2_CLIENT_ID'),
                 x_oauth2_client_secret=os.getenv('X_OAUTH2_CLIENT_SECRET'),
                 discord_webhook_url=self._get_required_env('DISCORD_WEBHOOK_URL'),
-                discord_ebilog_webhook_url=os.getenv('DISCORD_EBILOG_WEBHOOK_URL'),
+                discord_log_webhook_url=os.getenv('DISCORD_LOG_WEBHOOK_URL'),
                 polling_interval=int(os.getenv('POLLING_INTERVAL', '60')),
                 x_premium=os.getenv('X_PREMIUM', 'true').lower() == 'true'
             )
@@ -159,9 +159,9 @@ class ConfigManager:
         return self._config.discord_webhook_url
 
     @property
-    def discord_ebilog_webhook_url(self) -> Optional[str]:
-        """Get Discord ebilog webhook URL."""
-        return self._config.discord_ebilog_webhook_url
+    def discord_log_webhook_url(self) -> Optional[str]:
+        """Get Discord log webhook URL."""
+        return self._config.discord_log_webhook_url
 
     @property
     def polling_interval(self) -> int:

@@ -17,7 +17,7 @@ from process_skyblue.services.bluesky_input_service import (
     BlueskyAuthError
 )
 from process_skyblue.services.x_output_service import XOutputService
-from process_skyblue.services.discord_ebilog_service import DiscordEbilogService
+from process_skyblue.services.discord_log_service import DiscordLogService
 from process_skyblue.utils.content_processor import ContentProcessor
 
 
@@ -84,10 +84,10 @@ def main():
         )
         
         # Initialize Discord ebilog service (optional)
-        discord_ebilog_service = None
-        if config.discord_ebilog_webhook_url:
-            discord_ebilog_service = DiscordEbilogService(
-                webhook_url=config.discord_ebilog_webhook_url
+        discord_log_service = None
+        if config.discord_log_webhook_url:
+            discord_log_service = DiscordLogService(
+                webhook_url=config.discord_log_webhook_url
             )
 
         content_processor = ContentProcessor(x_premium=config.x_premium)
@@ -109,7 +109,7 @@ def main():
             logger.error("Failed to connect to X")
             return
         
-        if discord_ebilog_service:
+        if discord_log_service:
             logger.info("Discord えびログ output enabled")
         else:
             logger.info("Discord えびログ output disabled (no webhook URL)")
@@ -210,9 +210,9 @@ def main():
                             or state.is_post_permanently_failed(post['id'])
                         )
                         discord_done = (
-                            state.is_destination_completed(post['id'], 'discord_ebilog')
-                            or state.is_discord_ebilog_permanently_failed(post['id'])
-                            or not discord_ebilog_service
+                            state.is_destination_completed(post['id'], 'discord_log')
+                            or state.is_discord_log_permanently_failed(post['id'])
+                            or not discord_log_service
                         )
 
                         if x_done and discord_done:
@@ -226,8 +226,8 @@ def main():
                         if needs_x and state.is_post_failed(post['id']):
                             retry_count = state.get_failed_post_count(post['id'])
                             logger.info(f"🔄 Retrying X for post {post['id']} (attempt {retry_count + 1}/{state.max_retry_count})")
-                        if needs_discord and state.is_discord_ebilog_failed(post['id']):
-                            retry_count = state.get_discord_ebilog_failed_count(post['id'])
+                        if needs_discord and state.is_discord_log_failed(post['id']):
+                            retry_count = state.get_discord_log_failed_count(post['id'])
                             logger.info(f"🔄 Retrying Discord ebilog for post {post['id']} (attempt {retry_count + 1}/{state.max_retry_count})")
 
                         posts_to_process.append({
@@ -413,7 +413,7 @@ def main():
                                 # --- Discord えびログ posting (if needed) ---
                                 if item['needs_discord']:
                                     logger.info(f"📢 Attempting to post to Discord えびログ...")
-                                    discord_result = discord_ebilog_service.post_content(
+                                    discord_result = discord_log_service.post_content(
                                         content=post['content'],
                                         metadata={
                                             'post_id': post['id'],
@@ -423,12 +423,12 @@ def main():
 
                                     if discord_result['success']:
                                         logger.info(f"Successfully posted to Discord えびログ")
-                                        state.mark_destination_completed(post['id'], 'discord_ebilog')
-                                        state.remove_from_discord_ebilog_failed(post['id'])
+                                        state.mark_destination_completed(post['id'], 'discord_log')
+                                        state.remove_from_discord_log_failed(post['id'])
                                     else:
                                         error_msg = discord_result.get('error', 'Unknown error')
                                         logger.error(f"Failed to post to Discord えびログ: {error_msg}")
-                                        permanently_failed = state.add_discord_ebilog_failed_post(
+                                        permanently_failed = state.add_discord_log_failed_post(
                                             post['id'], post['timestamp'], error_msg
                                         )
                                         if permanently_failed:
