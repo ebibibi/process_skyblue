@@ -1,0 +1,6 @@
+[Unit]
+Description=Daily restart for Process BlueSky
+
+[Service]
+Type=oneshot
+ExecStart=/bin/systemctl restart process-bluesky.service

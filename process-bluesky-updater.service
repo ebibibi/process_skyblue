@@ -1,5 +1,5 @@
 [Unit]
-Description=Process SkyBlue Update Checker
+Description=Process BlueSky Update Checker
 # git fetch するのでネットワーク疎通が必要
 Wants=network-online.target
 After=network-online.target docker.service
@@ -10,10 +10,10 @@ Type=oneshot
 # root で実行（systemctl restart のため）
 # git/docker 操作はスクリプト内でユーザーとして実行
 # 実際のパスに合わせて変更してください
-WorkingDirectory=/path/to/process_skyblue
-ExecStart=/path/to/process_skyblue/update-checker.sh
+WorkingDirectory=/path/to/process_bluesky
+ExecStart=/path/to/process_bluesky/update-checker.sh
 
 # ログ設定
 StandardOutput=journal
 StandardError=journal
-SyslogIdentifier=process-skyblue-updater
+SyslogIdentifier=process-bluesky-updater

@@ -1,11 +1,11 @@
 """
-Discord Log Output Service for Process SkyBlue.
+Discord Log Output Service for Process BlueSky.
 
 Posts BlueSky content to a Discord channel via webhook.
 """
 import requests
 from typing import Dict, Any, Optional
-from process_skyblue.services.base_output_service import BaseOutputService
+from process_bluesky.services.base_output_service import BaseOutputService
 
 
 class DiscordLogService(BaseOutputService):

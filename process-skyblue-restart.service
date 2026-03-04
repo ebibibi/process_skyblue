@@ -1,6 +1,0 @@
-[Unit]
-Description=Daily restart for Process SkyBlue
-
-[Service]
-Type=oneshot
-ExecStart=/bin/systemctl restart process-skyblue.service

@@ -1,4 +1,4 @@
-# Process SkyBlue - Bluesky to X Cross-posting Service
+# Process BlueSky - Bluesky to X Cross-posting Service
 FROM python:3.9-slim
 
 # Set working directory
@@ -32,8 +32,8 @@ ENV PYTHONPATH=/app/src
 ENV PYTHONUNBUFFERED=1
 
 # Labels
-LABEL description="Process SkyBlue - Bluesky to X Cross-posting Service" \
+LABEL description="Process BlueSky - Bluesky to X Cross-posting Service" \
       version="1.0"
 
 # Default command
-CMD ["python3", "-m", "process_skyblue.main"]
+CMD ["python3", "-m", "process_bluesky.main"]

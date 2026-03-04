@@ -1,5 +1,5 @@
 #!/bin/bash
-# Process SkyBlue 自動更新スクリプト
+# Process BlueSky 自動更新スクリプト
 # git pull して変更があれば Docker イメージを再ビルドしサービスを再起動
 #
 # 注意: このスクリプトは root で実行される（systemctl restart のため）
@@ -7,8 +7,8 @@
 
 set -e
 
-REPO_DIR="/path/to/process_skyblue"  # 実際のパスに合わせて変更してください
-LOG_TAG="process-skyblue-updater"
+REPO_DIR="/path/to/process_bluesky"  # 実際のパスに合わせて変更してください
+LOG_TAG="process-bluesky-updater"
 RUN_USER="your-username"  # 実際のユーザー名に合わせて変更してください
 
 log() {
@@ -47,10 +47,10 @@ run_as_user git pull origin main
 
 # Docker イメージを再ビルド
 log "Rebuilding Docker image..."
-run_as_user docker build -t process-skyblue .
+run_as_user docker build -t process-bluesky .
 
 # サービスを再起動（root で実行されているので sudo 不要）
 log "Restarting service..."
-systemctl restart process-skyblue.service
+systemctl restart process-bluesky.service
 
 log "Update complete! Service restarted with new code."

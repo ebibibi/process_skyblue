@@ -4,7 +4,7 @@ Tests for Logger.
 import pytest
 import logging
 from unittest.mock import patch, Mock
-from process_skyblue.core.logger import Logger
+from process_bluesky.core.logger import Logger
 
 
 class TestLogger:
@@ -14,7 +14,7 @@ class TestLogger:
         """Test logger initialization with default settings."""
         logger = Logger()
         
-        assert logger.logger.name == "process_skyblue"
+        assert logger.logger.name == "process_bluesky"
         assert logger.logger.level == logging.INFO
     
     def test_logger_with_custom_name_and_level(self):

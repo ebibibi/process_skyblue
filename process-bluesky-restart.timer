@@ -1,0 +1,10 @@
+[Unit]
+Description=Daily restart timer for Process BlueSky
+
+[Timer]
+OnCalendar=daily
+Persistent=true
+Unit=process-bluesky-restart.service
+
+[Install]
+WantedBy=timers.target

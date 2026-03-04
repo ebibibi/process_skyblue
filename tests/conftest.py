@@ -86,7 +86,7 @@ def temp_state_file():
 @pytest.fixture
 def mock_datetime():
     """Mock datetime for consistent testing."""
-    with patch('process_skyblue.utils.datetime') as mock_dt:
+    with patch('process_bluesky.utils.datetime') as mock_dt:
         mock_dt.now.return_value = datetime(2025, 7, 13, 10, 0, 0, tzinfo=timezone.utc)
         mock_dt.fromisoformat = datetime.fromisoformat
         yield mock_dt

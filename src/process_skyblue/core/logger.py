@@ -1,5 +1,5 @@
 """
-Logger for Process SkyBlue.
+Logger for Process BlueSky.
 
 Provides centralized logging with Discord notification integration
 for error handling and monitoring.
@@ -15,7 +15,7 @@ class Logger:
     
     def __init__(
         self, 
-        name: str = "process_skyblue", 
+        name: str = "process_bluesky", 
         level: int = logging.INFO,
         discord_notifier: Optional[object] = None
     ):

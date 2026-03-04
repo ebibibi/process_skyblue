@@ -3,8 +3,8 @@ Tests for Base Service interfaces.
 """
 import pytest
 from abc import ABC
-from process_skyblue.services.base_input_service import BaseInputService
-from process_skyblue.services.base_output_service import BaseOutputService
+from process_bluesky.services.base_input_service import BaseInputService
+from process_bluesky.services.base_output_service import BaseOutputService
 
 
 class TestBaseInputService:

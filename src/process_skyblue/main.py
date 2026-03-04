@@ -1,24 +1,24 @@
 """
-Main entry point for Process SkyBlue.
+Main entry point for Process BlueSky.
 
 Orchestrates the cross-posting service between Bluesky and X.
 """
 import time
 import sys
 import os
-from process_skyblue.core.config_manager import ConfigManager
-from process_skyblue.core.state_manager import StateManager
-from process_skyblue.core.logger import Logger
-from process_skyblue.services.discord_notifier import DiscordNotifier
-from process_skyblue.services.bluesky_input_service import (
+from process_bluesky.core.config_manager import ConfigManager
+from process_bluesky.core.state_manager import StateManager
+from process_bluesky.core.logger import Logger
+from process_bluesky.services.discord_notifier import DiscordNotifier
+from process_bluesky.services.bluesky_input_service import (
     BlueskyInputService,
     BlueskyServerError,
     BlueskyRateLimitError,
     BlueskyAuthError
 )
-from process_skyblue.services.x_output_service import XOutputService
-from process_skyblue.services.discord_log_service import DiscordLogService
-from process_skyblue.utils.content_processor import ContentProcessor
+from process_bluesky.services.x_output_service import XOutputService
+from process_bluesky.services.discord_log_service import DiscordLogService
+from process_bluesky.utils.content_processor import ContentProcessor
 
 
 def _group_thread_posts(posts: list) -> list:
@@ -60,7 +60,7 @@ def main():
     """Main application entry point."""
     try:
         # Initialize core components
-        print("🚀 Initializing Process SkyBlue...")
+        print("🚀 Initializing Process BlueSky...")
         
         config = ConfigManager()
         state = StateManager()
@@ -92,7 +92,7 @@ def main():
 
         content_processor = ContentProcessor(x_premium=config.x_premium)
 
-        logger.info("Process SkyBlue started successfully")
+        logger.info("Process BlueSky started successfully")
         logger.info(f"Polling interval: {config.polling_interval} seconds")
         logger.info(f"Target user: {config.bluesky_identifier}")
         x_limit = XOutputService.X_PREMIUM_MAX_LENGTH if config.x_premium else XOutputService.X_FREE_MAX_LENGTH
@@ -471,10 +471,10 @@ def main():
         bluesky_service.disconnect()
         x_service.disconnect()
         
-        logger.info("Process SkyBlue stopped")
+        logger.info("Process BlueSky stopped")
         
     except Exception as e:
-        print(f"❌ Failed to start Process SkyBlue: {str(e)}")
+        print(f"❌ Failed to start Process BlueSky: {str(e)}")
         sys.exit(1)
 
 

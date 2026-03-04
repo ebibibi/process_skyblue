@@ -1,12 +1,12 @@
 """
-Bluesky Input Service for Process SkyBlue.
+Bluesky Input Service for Process BlueSky.
 
 Handles connection to Bluesky AT Protocol and retrieval of posts.
 """
 import time
 from typing import List, Dict, Any, Optional
 from datetime import datetime
-from process_skyblue.services.base_input_service import BaseInputService
+from process_bluesky.services.base_input_service import BaseInputService
 
 try:
     from atproto import Client

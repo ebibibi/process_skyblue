@@ -4,7 +4,7 @@ Tests for BlueskyInputService.
 import pytest
 from types import SimpleNamespace
 from unittest.mock import Mock, patch, MagicMock
-from process_skyblue.services.bluesky_input_service import BlueskyInputService
+from process_bluesky.services.bluesky_input_service import BlueskyInputService
 
 
 class TestBlueskyInputService:
@@ -13,7 +13,7 @@ class TestBlueskyInputService:
     @pytest.fixture
     def mock_client(self):
         """Mock atproto client."""
-        with patch('process_skyblue.services.bluesky_input_service.Client') as mock_client_class:
+        with patch('process_bluesky.services.bluesky_input_service.Client') as mock_client_class:
             mock_client = Mock()
             mock_client_class.return_value = mock_client
             yield mock_client
@@ -184,7 +184,7 @@ class TestResolveFacetLinks:
 
     @pytest.fixture
     def service(self):
-        with patch('process_skyblue.services.bluesky_input_service.Client'):
+        with patch('process_bluesky.services.bluesky_input_service.Client'):
             return BlueskyInputService(
                 identifier="test.bsky.social",
                 password="test_password"

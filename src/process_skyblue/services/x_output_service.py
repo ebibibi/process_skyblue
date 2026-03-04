@@ -1,5 +1,5 @@
 """
-X (Twitter) Output Service for Process SkyBlue.
+X (Twitter) Output Service for Process BlueSky.
 
 Handles posting content to X using the Twitter API.
 """
@@ -7,7 +7,7 @@ import tempfile
 import requests
 import logging
 from typing import Dict, Any, Optional, List
-from process_skyblue.services.base_output_service import BaseOutputService
+from process_bluesky.services.base_output_service import BaseOutputService
 
 # Enable tweepy debug logging
 logging.basicConfig(level=logging.INFO)

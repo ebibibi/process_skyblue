@@ -5,7 +5,7 @@ import pytest
 import json
 import os
 import tempfile
-from process_skyblue.core.state_manager import StateManager
+from process_bluesky.core.state_manager import StateManager
 
 
 @pytest.fixture

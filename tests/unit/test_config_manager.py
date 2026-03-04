@@ -5,7 +5,7 @@ import pytest
 import os
 import tempfile
 from unittest.mock import patch, mock_open
-from process_skyblue.core.config_manager import ConfigManager
+from process_bluesky.core.config_manager import ConfigManager
 
 
 class TestConfigManager:

@@ -6,7 +6,7 @@ import json
 import os
 from datetime import datetime, timezone
 from unittest.mock import patch, mock_open
-from process_skyblue.core.state_manager import StateManager
+from process_bluesky.core.state_manager import StateManager
 
 
 class TestStateManager:

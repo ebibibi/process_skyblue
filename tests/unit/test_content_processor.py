@@ -2,7 +2,7 @@
 Tests for ContentProcessor.
 """
 import pytest
-from process_skyblue.utils.content_processor import ContentProcessor
+from process_bluesky.utils.content_processor import ContentProcessor
 
 
 class TestContentProcessor:
