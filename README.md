@@ -2,7 +2,7 @@
 
 **Automatic cross-posting service from BlueSky to X (Twitter) and Discord.**
 
-Runs as a Docker container, polls the BlueSky API, and automatically mirrors your posts to X and Discord.
+Runs as a single-shot process (one invocation = one check cycle). Call it every 60 seconds with cron, systemd timer, or your own scheduler to continuously mirror your BlueSky posts to X and Discord.
 
 [日本語](#japanese) | [中文](#chinese)
 
@@ -38,7 +38,7 @@ X:      "Part 1\n\nPart 2\n\nPart 3" (single post)
 
 ### Requirements
 
-- Docker
+- Python 3.10+
 - BlueSky account
 - X (Twitter) developer account and API keys — [X Developer Portal](https://developer.twitter.com/en/portal/dashboard)
 - Discord Webhook URL for error notifications — [How to create](https://support.discord.com/hc/en-us/articles/228383668)
@@ -81,25 +81,17 @@ X_PREMIUM=true
 
 > **BlueSky App Password**: For security, use an [App Password](https://bsky.app/settings/app-passwords) instead of your account password.
 
-### 3. Run with Docker
+### 3. Install dependencies
 
 ```bash
-# Build the image
-docker build -t process-bluesky .
-
-# Start the container
-docker run -d \
-  --name process-bluesky \
-  --env-file .env \
-  -v $(pwd)/data:/app/data \
-  --restart=unless-stopped \
-  process-bluesky
+pip install -r requirements.txt
 ```
 
-### 4. Verify it's running
+### 4. Run once (single-shot mode)
 
 ```bash
-docker logs -f process-bluesky
+source .env
+PYTHONPATH=src python3 -m process_bluesky.main
 ```
 
 Expected output:
@@ -109,18 +101,29 @@ Expected output:
 X mode: Premium (25000 chars)
 Connecting to Bluesky...
 All services connected successfully!
-Starting main polling loop...
+Starting single-run check...
+...
+Check completed
+Disconnecting from services...
+Process BlueSky stopped
 ```
 
-## systemd service (Linux)
+### 5. Schedule repeated execution
 
-To run without Docker as a systemd service:
+The process exits after each check. Use your preferred scheduler to call it every 60 seconds:
 
+**cron** (every minute):
 ```bash
-sudo cp process-bluesky.service /etc/systemd/system/
-sudo nano /etc/systemd/system/process-bluesky.service  # Edit paths to match your setup
-sudo systemctl daemon-reload
-sudo systemctl enable --now process-bluesky
+* * * * * cd /path/to/process_bluesky && source .env && PYTHONPATH=src python3 -m process_bluesky.main >> /var/log/process_bluesky.log 2>&1
+```
+
+**systemd timer**: See `process-bluesky.service` and `process-bluesky-restart.timer` in the repo.
+
+**Docker** (classic always-on container with internal loop — legacy mode):
+```bash
+docker build -t process-bluesky .
+docker run -d --name process-bluesky --env-file .env \
+  -v $(pwd)/data:/app/data --restart=unless-stopped process-bluesky
 ```
 
 ## Configuration reference
@@ -172,7 +175,7 @@ src/process_bluesky/
 │   └── discord_notifier.py        # Discord Webhook (error notifications)
 ├── utils/
 │   └── content_processor.py  # Character counting, URL encoding, thread splitting
-└── main.py                   # Entry point and main loop
+└── main.py                   # Entry point — single-shot check-and-exit
 ```
 
 See [design.md](./design.md) for detailed architecture documentation.
@@ -204,8 +207,9 @@ BlueSkyへの投稿をX（Twitter）とDiscordに自動クロスポストする�
 
 1. リポジトリをクローン
 2. `.env.example` を `.env` にコピーして認証情報を設定
-3. `docker build -t process-bluesky .` でビルド
-4. `docker run -d --name process-bluesky --env-file .env -v $(pwd)/data:/app/data --restart=unless-stopped process-bluesky` で起動
+3. `pip install -r requirements.txt` で依存パッケージをインストール
+4. `source .env && PYTHONPATH=src python3 -m process_bluesky.main` で動作確認
+5. cron または systemd timer で60秒ごとに実行するよう設定
 
 詳細は上記の英語セクションを参照してください。
 
@@ -228,7 +232,8 @@ BlueSkyへの投稿をX（Twitter）とDiscordに自動クロスポストする�
 
 1. 克隆仓库
 2. 将 `.env.example` 复制为 `.env` 并填写认证信息
-3. 运行 `docker build -t process-bluesky .` 构建镜像
-4. 运行 `docker run -d --name process-bluesky --env-file .env -v $(pwd)/data:/app/data --restart=unless-stopped process-bluesky` 启动服务
+3. 运行 `pip install -r requirements.txt` 安装依赖
+4. 运行 `source .env && PYTHONPATH=src python3 -m process_bluesky.main` 验证运行
+5. 使用 cron 或 systemd timer 每60秒定时执行
 
 详细配置请参阅上方英文部分。

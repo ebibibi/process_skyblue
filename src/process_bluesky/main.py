@@ -1,9 +1,9 @@
 """
 Main entry point for Process BlueSky.
 
-Orchestrates the cross-posting service between Bluesky and X.
+Runs once per invocation: checks for new BlueSky posts and cross-posts them.
+Designed to be called repeatedly by an external scheduler (e.g. every 60 seconds).
 """
-import time
 import sys
 import os
 from process_bluesky.core.config_manager import ConfigManager
@@ -123,8 +123,7 @@ def main():
             skip_post_ids = set(skip_env.split(','))
             logger.info(f"Will skip posts with IDs: {skip_post_ids}")
         
-        # Main loop
-        logger.info("Starting main polling loop...")
+        logger.info("Starting single-run check...")
 
         # Counter for consecutive network errors
         consecutive_network_errors = 0
@@ -144,25 +143,23 @@ def main():
                     logger.error(
                         f"Bluesky API サーバー側エラー: {str(e)}\n"
                         f"【原因推測】Bluesky側のインフラ障害（502/503/504）。コード側の問題ではありません。\n"
-                        f"【対応】自動リトライします。継続する場合は https://status.bsky.app/ を確認してください。"
+                        f"【対応】次回実行時に自動リトライします。継続する場合は https://status.bsky.app/ を確認してください。"
                     )
-                    time.sleep(config.polling_interval)
-                    continue
+                    sys.exit(0)
                 except BlueskyRateLimitError as e:
                     logger.error(
                         f"Bluesky API レートリミット: {str(e)}\n"
                         f"【原因推測】API呼び出し回数が上限に達しました。\n"
-                        f"【対応】自動リトライします。通常は数分で回復します。"
+                        f"【対応】次回実行時に自動リトライします。通常は数分で回復します。"
                     )
-                    time.sleep(config.polling_interval)
-                    continue
+                    sys.exit(0)
                 except BlueskyAuthError as e:
                     logger.error(
                         f"Bluesky API 認証エラー: {str(e)}\n"
                         f"【原因推測】認証情報が無効または期限切れです。\n"
                         f"【対応】.envファイルのBLUESKY_IDENTIFIER/PASSWORDを確認してください。"
                     )
-                    break
+                    sys.exit(1)
                 except Exception as e:
                     error_msg = str(e) if str(e) else f"{type(e).__name__}: {repr(e)}"
                     # Check if this is a network error
@@ -179,9 +176,8 @@ def main():
                             logger.warning(f"Bluesky API network error ({consecutive_network_errors}/{NETWORK_ERROR_THRESHOLD}): {error_msg}")
                     else:
                         logger.error(f"Failed to get posts from Bluesky API: {error_msg}")
-                    time.sleep(config.polling_interval)
-                    continue
-                
+                    sys.exit(0)
+
                 # Reset network error counter on successful API call
                 if consecutive_network_errors > 0:
                     logger.info(f"Network connection recovered after {consecutive_network_errors} error(s)")
@@ -455,17 +451,13 @@ def main():
                 # Update last check time
                 state.update_last_check()
                 
-                logger.info(f"Check completed. Next check in {config.polling_interval} seconds")
-                time.sleep(config.polling_interval)
-                
-            except KeyboardInterrupt:
-                logger.info("Received interrupt signal, shutting down...")
+                logger.info("Check completed")
                 break
+
             except Exception as e:
-                logger.error(f"Error in main loop: {str(e)}")
-                # Continue running even if there's an error
-                time.sleep(config.polling_interval)
-        
+                logger.error(f"Unexpected error during check: {str(e)}")
+                sys.exit(0)
+
         # Cleanup connections
         logger.info("Disconnecting from services...")
         bluesky_service.disconnect()
