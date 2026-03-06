@@ -381,14 +381,6 @@ def main():
 
                                             state.mark_destination_completed(post['id'], 'x')
                                             state.remove_from_failed(post['id'])
-
-                                            # Send success notification to Discord ops channel
-                                            thread_indicator = f" (🧵 {len(content_chunks)}件のスレッド)" if needs_thread else ""
-                                            merge_indicator = f" (🔀 {len(x_merge['secondary_ids']) + 1}件をマージ)" if x_merge else ""
-                                            discord_notifier.send_success_notification(
-                                                title=f"Xへの投稿成功{thread_indicator}{merge_indicator}",
-                                                message=f"{post['content'][:100]}{'...' if len(post['content']) > 100 else ''}\n\n{post_url}"
-                                            )
                                         else:
                                             error_msg = result.get('error', 'Unknown error')
                                             logger.error(f"Failed to post to X: {error_msg}")
