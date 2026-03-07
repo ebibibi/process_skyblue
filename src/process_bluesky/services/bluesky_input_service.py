@@ -182,12 +182,65 @@ class BlueskyInputService(BaseInputService):
         )
 
         posts = []
+        seen_ids = set()
         for item in response.feed:
             # item is a FeedViewPost object, need to access .post attribute
             if hasattr(item, 'post') and self._is_own_post_from_feed_item(item) and self._is_newer_than_from_feed_item(item, since_timestamp):
-                posts.append(self._convert_to_standard_format_from_feed_item(item))
+                post_data = self._convert_to_standard_format_from_feed_item(item)
+                if post_data['id'] not in seen_ids:
+                    posts.append(post_data)
+                    seen_ids.add(post_data['id'])
+
+        # BlueSky's getAuthorFeed omits intermediate posts in multi-part threads
+        # (e.g. in a 3-post thread A→B→C, only A and C appear in the feed).
+        # For any post that belongs to a thread, fetch the full thread via
+        # get_post_thread and add any missing posts that are newer than since_timestamp.
+        thread_roots_to_fetch = set()
+        for post in posts:
+            root_uri = post.get('thread_root')
+            if root_uri and root_uri not in seen_ids:
+                thread_roots_to_fetch.add(root_uri)
+
+        for root_uri in thread_roots_to_fetch:
+            try:
+                thread_response = self.client.get_post_thread(uri=root_uri)
+                thread_posts = self._extract_thread_posts_flat(thread_response.thread, since_timestamp)
+                for tp in thread_posts:
+                    if tp['id'] not in seen_ids:
+                        posts.append(tp)
+                        seen_ids.add(tp['id'])
+                        print(f"🔗 Supplemented missing thread post: {tp['id'].split('/')[-1]}")
+            except Exception as e:
+                print(f"⚠️ Failed to fetch thread for {root_uri}: {e}")
 
         return posts
+
+    def _extract_thread_posts_flat(self, node: Any, since_timestamp: Optional[str]) -> List[Dict[str, Any]]:
+        """
+        Walk a post thread tree (depth-first) and return all self-authored posts
+        that are newer than since_timestamp as a flat list.
+
+        Thread nodes returned by get_post_thread already have a .post attribute
+        with the same structure as FeedViewPost.post, so we can use the existing
+        helper methods by wrapping the node in a simple object with a .post field.
+        """
+        results = []
+        if node is None or not hasattr(node, 'post'):
+            return results
+
+        # Wrap node so _is_own_post_from_feed_item / _is_newer_than_from_feed_item work
+        class _NodeWrapper:
+            def __init__(self, post):
+                self.post = post
+
+        wrapper = _NodeWrapper(node.post)
+        if self._is_own_post_from_feed_item(wrapper) and self._is_newer_than_from_feed_item(wrapper, since_timestamp):
+            results.append(self._convert_to_standard_format_from_feed_item(wrapper))
+
+        for reply in getattr(node, 'replies', None) or []:
+            results.extend(self._extract_thread_posts_flat(reply, since_timestamp))
+
+        return results
     
     def disconnect(self) -> None:
         """Disconnect from Bluesky."""

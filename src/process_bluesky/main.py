@@ -21,37 +21,94 @@ from process_bluesky.services.discord_log_service import DiscordLogService
 from process_bluesky.utils.content_processor import ContentProcessor
 
 
+def _sort_group_by_reply_chain(posts: list) -> list:
+    """
+    Sort a group of posts by following the reply_to chain (oldest/root first).
+
+    Finds the post whose reply_to is not present in this group (i.e. the local
+    root), then follows the chain forward.  Falls back to timestamp sort for
+    any posts that cannot be chained.
+    """
+    group_ids = {p['id'] for p in posts}
+    assigned = set()
+    result = []
+
+    # Start from the post whose reply_to is outside this group (local root)
+    for start in sorted(posts, key=lambda p: p['timestamp']):
+        if start['id'] in assigned:
+            continue
+        if start.get('reply_to') in group_ids:
+            continue  # not a root in this group
+        result.append(start)
+        assigned.add(start['id'])
+        while True:
+            last_id = result[-1]['id']
+            nxt = next(
+                (p for p in posts if p.get('reply_to') == last_id and p['id'] not in assigned),
+                None,
+            )
+            if nxt is None:
+                break
+            result.append(nxt)
+            assigned.add(nxt['id'])
+
+    # Append any remainder (should not happen in a valid chain)
+    for post in sorted(posts, key=lambda p: p['timestamp']):
+        if post['id'] not in assigned:
+            result.append(post)
+
+    return result
+
+
 def _group_thread_posts(posts: list) -> list:
     """
     Group BlueSky self-reply chain posts within the same batch.
 
     Returns a list of groups (each group: list of posts sorted oldest-first).
-    Posts are grouped when post B's reply_to == post A's id within the same batch.
+
+    Strategy: use thread_root URI as the grouping key. Every reply post carries
+    the same thread_root (the root post's URI), so posts belonging to the same
+    thread are grouped together regardless of timestamp ties or missing
+    intermediate posts in the feed.
+
+    Root posts (no thread_root field) that are themselves the root of other posts
+    in the batch are added to the same group as their replies.
+    Posts with no thread relationship remain as single-post groups.
     """
     sorted_posts = sorted(posts, key=lambda p: p['timestamp'])
-    assigned = set()
-    groups = []
+    post_by_id = {p['id']: p for p in sorted_posts}
+
+    # Build groups keyed by thread_root URI
+    thread_groups: dict = {}  # root_uri -> list of posts
+    no_root_posts = []
 
     for post in sorted_posts:
-        if post['id'] in assigned:
-            continue
-        group = [post]
-        assigned.add(post['id'])
+        root_uri = post.get('thread_root')
+        if root_uri:
+            thread_groups.setdefault(root_uri, []).append(post)
+        else:
+            no_root_posts.append(post)
 
-        # Follow the self-reply chain forward within this batch
-        while True:
-            last_id = group[-1]['id']
-            next_post = next(
-                (p for p in sorted_posts
-                 if p.get('reply_to') == last_id and p['id'] not in assigned),
-                None,
-            )
-            if next_post is None:
-                break
-            group.append(next_post)
-            assigned.add(next_post['id'])
+    # Root posts themselves may be in the batch (no thread_root on a root post)
+    # Attach them to their own thread group if replies exist in this batch.
+    assigned = set()
+    for post in no_root_posts:
+        post_id = post['id']
+        if post_id in thread_groups:
+            # This post is the root of a thread group already identified
+            thread_groups[post_id].insert(0, post)
+            assigned.add(post_id)
 
-        groups.append(group)
+    groups = []
+
+    # Emit thread groups ordered by reply chain (falls back to timestamp)
+    for root_uri, group_posts in thread_groups.items():
+        groups.append(_sort_group_by_reply_chain(group_posts))
+
+    # Remaining posts with no thread_root and no replies in this batch
+    for post in no_root_posts:
+        if post['id'] not in assigned:
+            groups.append([post])
 
     return groups
 
