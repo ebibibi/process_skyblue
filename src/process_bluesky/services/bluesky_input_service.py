@@ -195,10 +195,13 @@ class BlueskyInputService(BaseInputService):
         # (e.g. in a 3-post thread A→B→C, only A and C appear in the feed).
         # For any post that belongs to a thread, fetch the full thread via
         # get_post_thread and add any missing posts that are newer than since_timestamp.
+        # Always fetch the full thread for any post that has a thread_root,
+        # even if the root post itself is already in the batch — intermediate
+        # posts may still be missing from the author feed.
         thread_roots_to_fetch = set()
         for post in posts:
             root_uri = post.get('thread_root')
-            if root_uri and root_uri not in seen_ids:
+            if root_uri:
                 thread_roots_to_fetch.add(root_uri)
 
         for root_uri in thread_roots_to_fetch:
