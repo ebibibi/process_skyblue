@@ -7,7 +7,7 @@ Designed to be called repeatedly by an external scheduler (e.g. every 60 seconds
 import sys
 import os
 from process_bluesky.core.config_manager import ConfigManager
-from process_bluesky.core.state_manager import StateManager
+from process_bluesky.core.state_manager import StateManager, CircuitBreakerTripped
 from process_bluesky.core.logger import Logger
 from process_bluesky.services.discord_notifier import DiscordNotifier
 from process_bluesky.services.bluesky_input_service import (
@@ -123,7 +123,19 @@ def main():
         state = StateManager()
         discord_notifier = DiscordNotifier(webhook_url=config.discord_webhook_url)
         logger = Logger(discord_notifier=discord_notifier)
-        
+
+        # Circuit breaker check — abort early if tripped
+        if state.circuit_breaker_tripped:
+            logger.error(
+                f"🚨 Circuit breaker is TRIPPED — refusing to run.\n"
+                f"Tripped at: {state.circuit_breaker_tripped_at}\n"
+                f"Reason: {state.circuit_breaker_reason}\n"
+                f"To reset: edit data/state.json and set circuit_breaker_tripped to false, "
+                f"or run: python3 -c \"from process_bluesky.core.state_manager import StateManager; "
+                f"s=StateManager(); s.reset_circuit_breaker(); print('Reset OK')\""
+            )
+            sys.exit(1)
+
         # Initialize services
         bluesky_service = BlueskyInputService(
             identifier=config.bluesky_identifier,
@@ -400,6 +412,9 @@ def main():
 
                                         logger.info(f"🚀 Attempting to post to X...")
 
+                                        # Circuit breaker safety check
+                                        state.pre_post_check(x_content)
+
                                         if needs_thread:
                                             result = x_service.post_thread(
                                                 contents=content_chunks,
@@ -416,6 +431,10 @@ def main():
                                         if result['success']:
                                             post_url = result.get('url', f"ID: {result.get('id') or result.get('first_tweet_id')}")
                                             logger.info(f"Successfully posted to X: {post_url}")
+
+                                            # Record for circuit breaker tracking
+                                            if not result.get('skipped'):
+                                                state.record_x_post(x_content)
 
                                             # Save mapping for primary and all merged secondary posts
                                             if needs_thread:
@@ -485,6 +504,15 @@ def main():
                                 if state.is_all_destinations_completed(post['id']):
                                     state.add_processed_post(post['id'], post['timestamp'])
 
+                            except CircuitBreakerTripped as cb_err:
+                                logger.error(
+                                    f"🚨 CIRCUIT BREAKER TRIPPED!\n"
+                                    f"Reason: {str(cb_err)}\n"
+                                    f"All X posting halted. Manual reset required.\n"
+                                    f"Posts this run: {state._posts_this_run}"
+                                )
+                                # Force exit — do not process any more posts
+                                sys.exit(1)
                             except Exception as e:
                                 error_msg = str(e)
                                 logger.error(f"Error processing post {post.get('id', 'unknown')}: {error_msg}")

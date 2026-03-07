@@ -6,8 +6,13 @@ and check times with persistent JSON storage.
 """
 import json
 import os
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import Optional
+
+
+class CircuitBreakerTripped(Exception):
+    """Raised when the X posting circuit breaker is tripped."""
+    pass
 
 
 class StateManager:
@@ -34,6 +39,16 @@ class StateManager:
         self.discord_log_permanently_failed_posts: list = []  # Same structure as permanently_failed_posts
         self.max_cache_size = 1000  # Keep last 1000 post IDs
         self.max_retry_count = 3  # Max retries before marking as permanently failed
+        self.x_post_log: list = []  # Timestamps of recent X posts for circuit breaker
+        self.x_content_hashes: list = []  # Recent content hashes for duplicate detection
+        self.circuit_breaker_tripped: bool = False
+        self.circuit_breaker_tripped_at: Optional[str] = None
+        self.circuit_breaker_reason: Optional[str] = None
+        # Circuit breaker thresholds
+        self.cb_max_posts_per_window = 10  # Max X posts in the time window
+        self.cb_window_minutes = 30  # Time window in minutes
+        self.cb_max_posts_per_run = 15  # Max X posts in a single run
+        self._posts_this_run = 0
         self._load_state()
     
     def _load_state(self) -> None:
@@ -53,6 +68,11 @@ class StateManager:
                     self.discord_log_permanently_failed_posts = state_data.get(
                         'discord_log_permanently_failed_posts', []
                     )
+                    self.x_post_log = state_data.get('x_post_log', [])
+                    self.x_content_hashes = state_data.get('x_content_hashes', [])
+                    self.circuit_breaker_tripped = state_data.get('circuit_breaker_tripped', False)
+                    self.circuit_breaker_tripped_at = state_data.get('circuit_breaker_tripped_at')
+                    self.circuit_breaker_reason = state_data.get('circuit_breaker_reason')
 
                     # Backward compatibility: posts in processed_posts_cache
                     # but not in completed_destinations are treated as all-destinations-completed
@@ -102,6 +122,14 @@ class StateManager:
                 k: v for k, v in self.completed_destinations.items() if k in keys_to_keep
             }
 
+        # Trim x_post_log to last 24 hours
+        cutoff = (datetime.now(timezone.utc) - timedelta(hours=24)).isoformat()
+        self.x_post_log = [ts for ts in self.x_post_log if ts > cutoff]
+
+        # Trim x_content_hashes to last 100
+        if len(self.x_content_hashes) > 100:
+            self.x_content_hashes = self.x_content_hashes[-100:]
+
         state_data = {
             'last_processed_at': self.last_processed_at,
             'last_check': self.last_check,
@@ -112,6 +140,11 @@ class StateManager:
             'completed_destinations': self.completed_destinations,
             'discord_log_failed_posts': self.discord_log_failed_posts,
             'discord_log_permanently_failed_posts': self.discord_log_permanently_failed_posts,
+            'x_post_log': self.x_post_log,
+            'x_content_hashes': self.x_content_hashes,
+            'circuit_breaker_tripped': self.circuit_breaker_tripped,
+            'circuit_breaker_tripped_at': self.circuit_breaker_tripped_at,
+            'circuit_breaker_reason': self.circuit_breaker_reason,
         }
 
         with open(self.state_file_path, 'w', encoding='utf-8') as f:
@@ -451,3 +484,87 @@ class StateManager:
         if post_id in self.discord_log_failed_posts:
             return self.discord_log_failed_posts[post_id]["count"]
         return 0
+
+    # --- Circuit breaker methods ---
+
+    def check_circuit_breaker(self) -> None:
+        """
+        Check if the circuit breaker is tripped. Call before any X posting.
+
+        Raises:
+            CircuitBreakerTripped: If the breaker is currently tripped.
+        """
+        if self.circuit_breaker_tripped:
+            raise CircuitBreakerTripped(
+                f"Circuit breaker tripped at {self.circuit_breaker_tripped_at}: "
+                f"{self.circuit_breaker_reason}"
+            )
+
+    def pre_post_check(self, content: str) -> None:
+        """
+        Run all safety checks before posting to X.
+
+        Checks:
+        1. Circuit breaker not already tripped
+        2. Rolling window rate limit not exceeded
+        3. Per-run limit not exceeded
+        4. Content not a duplicate of recent posts
+
+        Raises:
+            CircuitBreakerTripped: If any check fails (breaker is tripped).
+        """
+        self.check_circuit_breaker()
+
+        # Check rolling window rate limit
+        now = datetime.now(timezone.utc)
+        window_start = (now - timedelta(minutes=self.cb_window_minutes)).isoformat()
+        recent_posts = [ts for ts in self.x_post_log if ts > window_start]
+        if len(recent_posts) >= self.cb_max_posts_per_window:
+            self._trip_breaker(
+                f"Rolling window limit exceeded: {len(recent_posts)} posts "
+                f"in last {self.cb_window_minutes} minutes "
+                f"(limit: {self.cb_max_posts_per_window})"
+            )
+
+        # Check per-run limit
+        if self._posts_this_run >= self.cb_max_posts_per_run:
+            self._trip_breaker(
+                f"Per-run limit exceeded: {self._posts_this_run} posts "
+                f"in this run (limit: {self.cb_max_posts_per_run})"
+            )
+
+        # Check duplicate content
+        import hashlib
+        content_hash = hashlib.sha256(content.encode('utf-8')).hexdigest()[:16]
+        if content_hash in self.x_content_hashes:
+            self._trip_breaker(
+                f"Duplicate content detected: '{content[:50]}...' "
+                f"was already posted recently"
+            )
+
+    def record_x_post(self, content: str) -> None:
+        """Record a successful X post for circuit breaker tracking."""
+        now = datetime.now(timezone.utc).isoformat()
+        self.x_post_log.append(now)
+        self._posts_this_run += 1
+
+        import hashlib
+        content_hash = hashlib.sha256(content.encode('utf-8')).hexdigest()[:16]
+        self.x_content_hashes.append(content_hash)
+
+        self._save_state()
+
+    def _trip_breaker(self, reason: str) -> None:
+        """Trip the circuit breaker and persist the state."""
+        self.circuit_breaker_tripped = True
+        self.circuit_breaker_tripped_at = datetime.now(timezone.utc).isoformat()
+        self.circuit_breaker_reason = reason
+        self._save_state()
+        raise CircuitBreakerTripped(reason)
+
+    def reset_circuit_breaker(self) -> None:
+        """Manually reset the circuit breaker."""
+        self.circuit_breaker_tripped = False
+        self.circuit_breaker_tripped_at = None
+        self.circuit_breaker_reason = None
+        self._save_state()
