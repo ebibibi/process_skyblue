@@ -1,0 +1,80 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    - cron: '0 17 * * *'  # 毎日 02:00 JST (17:00 UTC)
+  workflow_dispatch:
+
+permissions:
+  issues: write
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: 依存関係インストール
+        run: pip install pytest pytest-mock pytest-asyncio pytest-cov
+
+      - name: テスト実行
+        id: test
+        run: |
+          pytest tests/ -v --tb=short 2>&1 | tee /tmp/test.log
+          echo "exit_code=${PIPESTATUS[0]}" >> "$GITHUB_OUTPUT"
+        continue-on-error: true
+
+      - name: スケジュール実行失敗時 GitHub Issue 作成
+        if: steps.test.outcome == 'failure' && github.event_name == 'schedule'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          DATE=$(date -u +%Y-%m-%d)
+          TEST_LOG="(ログなし)"
+          if [ -f /tmp/test.log ]; then
+            TEST_LOG=$(tail -60 /tmp/test.log)
+          fi
+
+          {
+            echo "## テスト失敗通知"
+            echo ""
+            echo "実行日時: $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+            echo ""
+            echo "ワークフロー実行: ${RUN_URL}"
+            echo ""
+            echo "---"
+            echo ""
+            echo "### テスト結果"
+            echo ""
+            echo '```'
+            echo "${TEST_LOG}"
+            echo '```'
+          } > /tmp/issue-body.md
+
+          gh label create "auto-fix" \
+            --color "e4e669" \
+            --description "issue_resolver による自動修正対象" \
+            --repo "${REPO}" 2>/dev/null || true
+
+          gh issue create \
+            --title "テスト失敗: process_bluesky CI (${DATE})" \
+            --body-file /tmp/issue-body.md \
+            --label "auto-fix" \
+            --repo "${REPO}"
+
+      - name: テスト失敗時にワークフローを失敗終了
+        if: steps.test.outcome == 'failure'
+        run: exit 1
