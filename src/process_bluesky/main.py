@@ -7,7 +7,7 @@ Designed to be called repeatedly by an external scheduler (e.g. every 60 seconds
 import sys
 import os
 from process_bluesky.core.config_manager import ConfigManager
-from process_bluesky.core.state_manager import StateManager, CircuitBreakerTripped
+from process_bluesky.core.state_manager import StateManager, CircuitBreakerTripped, DuplicateContentSkipped
 from process_bluesky.core.logger import Logger
 from process_bluesky.services.discord_notifier import DiscordNotifier
 from process_bluesky.services.bluesky_input_service import (
@@ -504,6 +504,16 @@ def main():
                                 if state.is_all_destinations_completed(post['id']):
                                     state.add_processed_post(post['id'], post['timestamp'])
 
+                            except DuplicateContentSkipped as dup_err:
+                                logger.warning(
+                                    f"⏭️ Skipping duplicate post: {str(dup_err)}"
+                                )
+                                # Mark X as done (content already posted previously)
+                                state.mark_destination_completed(post['id'], 'x')
+                                state.remove_from_failed(post['id'])
+                                if state.is_all_destinations_completed(post['id']):
+                                    state.add_processed_post(post['id'], post['timestamp'])
+                                continue
                             except CircuitBreakerTripped as cb_err:
                                 logger.error(
                                     f"🚨 CIRCUIT BREAKER TRIPPED!\n"

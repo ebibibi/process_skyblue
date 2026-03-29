@@ -3,7 +3,7 @@ import json
 import os
 import pytest
 from datetime import datetime, timezone, timedelta
-from process_bluesky.core.state_manager import StateManager, CircuitBreakerTripped
+from process_bluesky.core.state_manager import StateManager, CircuitBreakerTripped, DuplicateContentSkipped
 
 
 @pytest.fixture
@@ -45,10 +45,12 @@ class TestPrePostCheck:
     def test_passes_for_first_post(self, state):
         state.pre_post_check("Hello world")  # Should not raise
 
-    def test_duplicate_content_trips_breaker(self, state):
+    def test_duplicate_content_skips_post(self, state):
         state.record_x_post("Same content here")
-        with pytest.raises(CircuitBreakerTripped, match="Duplicate content"):
+        with pytest.raises(DuplicateContentSkipped, match="Duplicate content"):
             state.pre_post_check("Same content here")
+        # Circuit breaker should NOT be tripped for duplicates
+        assert not state.circuit_breaker_tripped
 
     def test_different_content_passes(self, state):
         state.record_x_post("First post")

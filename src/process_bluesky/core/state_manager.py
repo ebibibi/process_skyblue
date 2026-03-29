@@ -15,6 +15,11 @@ class CircuitBreakerTripped(Exception):
     pass
 
 
+class DuplicateContentSkipped(Exception):
+    """Raised when duplicate content is detected. The post should be skipped, not halt all processing."""
+    pass
+
+
 class StateManager:
     """Manages application state persistence."""
 
@@ -533,11 +538,11 @@ class StateManager:
                 f"in this run (limit: {self.cb_max_posts_per_run})"
             )
 
-        # Check duplicate content
+        # Check duplicate content — skip the post instead of tripping the breaker
         import hashlib
         content_hash = hashlib.sha256(content.encode('utf-8')).hexdigest()[:16]
         if content_hash in self.x_content_hashes:
-            self._trip_breaker(
+            raise DuplicateContentSkipped(
                 f"Duplicate content detected: '{content[:50]}...' "
                 f"was already posted recently"
             )
