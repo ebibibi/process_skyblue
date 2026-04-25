@@ -17,6 +17,7 @@ from process_bluesky.services.bluesky_input_service import (
     BlueskyAuthError
 )
 from process_bluesky.services.x_output_service import XOutputService
+from process_bluesky.services.x_intent_service import XIntentService
 from process_bluesky.services.discord_log_service import DiscordLogService
 from process_bluesky.utils.content_processor import ContentProcessor
 
@@ -137,21 +138,33 @@ def main():
             sys.exit(1)
 
         # Initialize services
+        use_intent_mode = config.x_post_mode == "intent"
+
         bluesky_service = BlueskyInputService(
             identifier=config.bluesky_identifier,
             password=config.bluesky_password
         )
-        
-        x_service = XOutputService(
-            api_key=config.x_api_key,
-            api_secret=config.x_api_secret,
-            access_token=config.x_access_token,
-            access_token_secret=config.x_access_token_secret,
-            oauth2_client_id=config.x_oauth2_client_id,
-            oauth2_client_secret=config.x_oauth2_client_secret,
-            x_premium=config.x_premium
-        )
-        
+
+        x_service = None
+        x_intent_service = None
+        content_processor = None
+
+        if use_intent_mode:
+            x_intent_service = XIntentService(
+                webhook_url=config.discord_webhook_url
+            )
+        else:
+            x_service = XOutputService(
+                api_key=config.x_api_key,
+                api_secret=config.x_api_secret,
+                access_token=config.x_access_token,
+                access_token_secret=config.x_access_token_secret,
+                oauth2_client_id=config.x_oauth2_client_id,
+                oauth2_client_secret=config.x_oauth2_client_secret,
+                x_premium=config.x_premium
+            )
+            content_processor = ContentProcessor(x_premium=config.x_premium)
+
         # Initialize Discord ebilog service (optional)
         discord_log_service = None
         if config.discord_log_webhook_url:
@@ -159,25 +172,29 @@ def main():
                 webhook_url=config.discord_log_webhook_url
             )
 
-        content_processor = ContentProcessor(x_premium=config.x_premium)
-
         logger.info("Process BlueSky started successfully")
         logger.info(f"Polling interval: {config.polling_interval} seconds")
         logger.info(f"Target user: {config.bluesky_identifier}")
-        x_limit = XOutputService.X_PREMIUM_MAX_LENGTH if config.x_premium else XOutputService.X_FREE_MAX_LENGTH
-        logger.info(f"X mode: {'Premium (' + str(x_limit) + ' chars)' if config.x_premium else 'Free (280 chars, thread splitting enabled)'}")
-        
+        if use_intent_mode:
+            logger.info("X mode: Intent (Web Intent URL → Discord)")
+        else:
+            x_limit = XOutputService.X_PREMIUM_MAX_LENGTH if config.x_premium else XOutputService.X_FREE_MAX_LENGTH
+            logger.info(f"X mode: {'Premium (' + str(x_limit) + ' chars)' if config.x_premium else 'Free (280 chars, thread splitting enabled)'}")
+
         # Connect to services
         logger.info("Connecting to Bluesky...")
         if not bluesky_service.connect():
             logger.error("Failed to connect to Bluesky")
             return
-        
-        logger.info("Connecting to X...")
-        if not x_service.connect():
-            logger.error("Failed to connect to X")
-            return
-        
+
+        if use_intent_mode:
+            logger.info("X Intent mode — skipping X API connection")
+        else:
+            logger.info("Connecting to X...")
+            if not x_service.connect():
+                logger.error("Failed to connect to X")
+                return
+
         if discord_log_service:
             logger.info("Discord えびログ output enabled")
         else:
@@ -346,11 +363,22 @@ def main():
 
                                 # --- X posting (if needed) ---
                                 if item['needs_x']:
+                                  if use_intent_mode:
+                                    # Intent mode: generate Web Intent URL → Discord
+                                    logger.info(f"🔗 Generating X Web Intent URL...")
+                                    result = x_intent_service.post_intent(content=post['content'])
+                                    if result['success']:
+                                        logger.info(f"Intent URL sent to Discord: {result.get('url', '')[:80]}...")
+                                        state.mark_destination_completed(post['id'], 'x')
+                                        state.remove_from_failed(post['id'])
+                                    else:
+                                        error_msg = result.get('error', 'Unknown error')
+                                        logger.error(f"Failed to send intent URL: {error_msg}")
+                                        state.add_failed_post(post['id'], post['timestamp'], error_msg)
+                                  else:
                                     x_merge = merged_x_posts.get(post['id'])
 
                                     if x_merge and not x_merge['is_primary']:
-                                        # Secondary post in a merged group.
-                                        # X was handled by the primary — finalize only if primary succeeded.
                                         primary_id = x_merge['primary_id']
                                         primary_tweet_id = state.get_twitter_id_for_bluesky_post(primary_id)
                                         if primary_tweet_id:
@@ -360,12 +388,10 @@ def main():
                                             state.mark_destination_completed(post['id'], 'x')
                                             state.add_post_mapping(post['id'], primary_tweet_id)
                                         else:
-                                            # Primary hasn't posted yet (or failed) — leave for retry
                                             logger.info(
                                                 f"🔀 X Premium: secondary post waiting for primary X post, will retry"
                                             )
                                     else:
-                                        # Normal X posting, or primary of a merged group
                                         reply_to_tweet_id = None
                                         if 'reply_to' in post:
                                             parent_bluesky_id = post['reply_to']
@@ -375,7 +401,6 @@ def main():
                                             else:
                                                 logger.info(f"⚠️ Thread parent not found in mapping: {parent_bluesky_id}")
 
-                                        # Determine content: merged (primary) or original
                                         if x_merge:
                                             raw_content = x_merge['content']
                                             logger.info(
@@ -385,10 +410,7 @@ def main():
                                         else:
                                             raw_content = post['content']
 
-                                        # Encode non-ASCII characters in URLs for X compatibility
                                         x_content = content_processor.encode_urls_for_x(raw_content)
-
-                                        # Check if content needs splitting (too long for single tweet)
                                         content_chunks = content_processor.split_for_thread(x_content)
                                         needs_thread = len(content_chunks) > 1
 
@@ -397,7 +419,6 @@ def main():
                                             for i, chunk in enumerate(content_chunks):
                                                 logger.info(f"   Chunk {i+1}: {chunk[:50]}... ({len(chunk)} chars)")
 
-                                        # Prepare metadata with images if present
                                         post_metadata = {
                                             'source_id': post['id'],
                                             'source_platform': 'bluesky',
@@ -412,7 +433,6 @@ def main():
 
                                         logger.info(f"🚀 Attempting to post to X...")
 
-                                        # Circuit breaker safety check
                                         state.pre_post_check(x_content)
 
                                         if needs_thread:
@@ -432,11 +452,9 @@ def main():
                                             post_url = result.get('url', f"ID: {result.get('id') or result.get('first_tweet_id')}")
                                             logger.info(f"Successfully posted to X: {post_url}")
 
-                                            # Record for circuit breaker tracking
                                             if not result.get('skipped'):
                                                 state.record_x_post(x_content)
 
-                                            # Save mapping for primary and all merged secondary posts
                                             if needs_thread:
                                                 first_id = result.get('first_tweet_id')
                                                 last_id = result.get('last_tweet_id')
@@ -548,7 +566,8 @@ def main():
         # Cleanup connections
         logger.info("Disconnecting from services...")
         bluesky_service.disconnect()
-        x_service.disconnect()
+        if x_service:
+            x_service.disconnect()
         
         logger.info("Process BlueSky stopped")
         

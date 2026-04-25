@@ -25,6 +25,14 @@ class Config(BaseModel):
     discord_log_webhook_url: Optional[str] = None
     polling_interval: int = 60
     x_premium: bool = True
+    x_post_mode: str = "api"
+
+    @field_validator('x_post_mode')
+    @classmethod
+    def validate_x_post_mode(cls, v):
+        if v not in ("api", "intent"):
+            raise ValueError('X_POST_MODE must be "api" or "intent"')
+        return v
 
     @field_validator('polling_interval')
     @classmethod
@@ -90,7 +98,8 @@ class ConfigManager:
                 discord_webhook_url=self._get_required_env('DISCORD_WEBHOOK_URL'),
                 discord_log_webhook_url=os.getenv('DISCORD_LOG_WEBHOOK_URL'),
                 polling_interval=int(os.getenv('POLLING_INTERVAL', '60')),
-                x_premium=os.getenv('X_PREMIUM', 'true').lower() == 'true'
+                x_premium=os.getenv('X_PREMIUM', 'true').lower() == 'true',
+                x_post_mode=os.getenv('X_POST_MODE', 'api')
             )
         except ValidationError as e:
             raise ValueError(f"Configuration validation error: {e}")
@@ -172,3 +181,7 @@ class ConfigManager:
     def x_premium(self) -> bool:
         """Get X Premium mode flag."""
         return self._config.x_premium
+
+    @property
+    def x_post_mode(self) -> str:
+        return self._config.x_post_mode
