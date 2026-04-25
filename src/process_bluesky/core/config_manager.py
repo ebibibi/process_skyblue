@@ -26,6 +26,7 @@ class Config(BaseModel):
     polling_interval: int = 60
     x_premium: bool = True
     x_post_mode: str = "api"
+    discord_x_intent_webhook_url: Optional[str] = None
 
     @field_validator('x_post_mode')
     @classmethod
@@ -53,15 +54,14 @@ class Config(BaseModel):
             raise ValueError('Invalid Discord webhook URL format')
         return v
 
-    @field_validator('discord_log_webhook_url')
+    @field_validator('discord_log_webhook_url', 'discord_x_intent_webhook_url')
     @classmethod
-    def validate_log_webhook_url(cls, v):
-        """Validate Discord log webhook URL format."""
+    def validate_optional_webhook_url(cls, v):
         if v is not None and not (
             v.startswith('https://discord.com/api/webhooks/')
             or v.startswith('https://discordapp.com/api/webhooks/')
         ):
-            raise ValueError('Invalid Discord log webhook URL format')
+            raise ValueError('Invalid Discord webhook URL format')
         return v
 
 
@@ -99,7 +99,8 @@ class ConfigManager:
                 discord_log_webhook_url=os.getenv('DISCORD_LOG_WEBHOOK_URL'),
                 polling_interval=int(os.getenv('POLLING_INTERVAL', '60')),
                 x_premium=os.getenv('X_PREMIUM', 'true').lower() == 'true',
-                x_post_mode=os.getenv('X_POST_MODE', 'api')
+                x_post_mode=os.getenv('X_POST_MODE', 'api'),
+                discord_x_intent_webhook_url=os.getenv('DISCORD_X_INTENT_WEBHOOK_URL')
             )
         except ValidationError as e:
             raise ValueError(f"Configuration validation error: {e}")
@@ -185,3 +186,7 @@ class ConfigManager:
     @property
     def x_post_mode(self) -> str:
         return self._config.x_post_mode
+
+    @property
+    def discord_x_intent_webhook_url(self) -> Optional[str]:
+        return self._config.discord_x_intent_webhook_url
