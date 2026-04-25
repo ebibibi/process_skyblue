@@ -1,11 +1,11 @@
 # Core dependencies
 python-dotenv==1.0.0
-pydantic==2.5.0
+pydantic>=2.7.0
 schedule==1.2.0
 requests==2.31.0
 
 # Bluesky
-atproto==0.0.46
+atproto>=0.0.55
 
 # X (Twitter)
 tweepy==4.14.0
