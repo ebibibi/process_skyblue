@@ -27,6 +27,7 @@ class Config(BaseModel):
     x_premium: bool = True
     x_post_mode: str = "api"
     discord_x_intent_webhook_url: Optional[str] = None
+    discord_mention_user_id: Optional[str] = None
 
     @field_validator('x_post_mode')
     @classmethod
@@ -100,7 +101,8 @@ class ConfigManager:
                 polling_interval=int(os.getenv('POLLING_INTERVAL', '60')),
                 x_premium=os.getenv('X_PREMIUM', 'true').lower() == 'true',
                 x_post_mode=os.getenv('X_POST_MODE', 'api'),
-                discord_x_intent_webhook_url=os.getenv('DISCORD_X_INTENT_WEBHOOK_URL')
+                discord_x_intent_webhook_url=os.getenv('DISCORD_X_INTENT_WEBHOOK_URL'),
+                discord_mention_user_id=os.getenv('DISCORD_MENTION_USER_ID')
             )
         except ValidationError as e:
             raise ValueError(f"Configuration validation error: {e}")
@@ -190,3 +192,7 @@ class ConfigManager:
     @property
     def discord_x_intent_webhook_url(self) -> Optional[str]:
         return self._config.discord_x_intent_webhook_url
+
+    @property
+    def discord_mention_user_id(self) -> Optional[str]:
+        return self._config.discord_mention_user_id

@@ -15,8 +15,9 @@ class XIntentService:
     INTENT_BASE = "https://x.com/intent/tweet"
     BLUESKY_BLUE = 0x0085FF
 
-    def __init__(self, webhook_url: str):
+    def __init__(self, webhook_url: str, mention_user_id: Optional[str] = None):
         self.webhook_url = webhook_url
+        self.mention_user_id = mention_user_id
 
     def connect(self) -> bool:
         return True
@@ -37,8 +38,12 @@ class XIntentService:
                     "color": self.BLUESKY_BLUE,
                     "footer": {"text": "BlueSky → X 半自動同期"},
                 }
-            ]
+            ],
         }
+
+        if self.mention_user_id:
+            payload["content"] = f"<@{self.mention_user_id}>"
+            payload["allowed_mentions"] = {"users": [self.mention_user_id]}
 
         try:
             response = requests.post(self.webhook_url, json=payload, timeout=10)

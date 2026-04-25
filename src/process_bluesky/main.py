@@ -152,7 +152,8 @@ def main():
         if use_intent_mode:
             intent_webhook = config.discord_x_intent_webhook_url or config.discord_webhook_url
             x_intent_service = XIntentService(
-                webhook_url=intent_webhook
+                webhook_url=intent_webhook,
+                mention_user_id=config.discord_mention_user_id,
             )
         else:
             x_service = XOutputService(
