@@ -329,7 +329,7 @@ def main():
                         # X Premium: build thread merging plan
                         # merged_x_posts: {post_id -> {'is_primary': bool, ...}}
                         merged_x_posts = {}
-                        if config.x_premium:
+                        if config.x_premium or use_intent_mode:
                             needs_x_posts = [
                                 item['post'] for item in posts_to_process if item['needs_x']
                             ]
@@ -366,9 +366,15 @@ def main():
                                 # --- X posting (if needed) ---
                                 if item['needs_x']:
                                   if use_intent_mode:
+                                    x_merge = merged_x_posts.get(post['id'])
+                                    if x_merge and not x_merge['is_primary']:
+                                        logger.info(f"🔀 Intent: secondary post absorbed into merged intent, marking X done")
+                                        state.mark_destination_completed(post['id'], 'x')
+                                        continue
+                                    intent_content = x_merge['content'] if x_merge else post['content']
                                     # Intent mode: generate Web Intent URL → Discord
                                     logger.info(f"🔗 Generating X Web Intent URL...")
-                                    result = x_intent_service.post_intent(content=post['content'])
+                                    result = x_intent_service.post_intent(content=intent_content)
                                     if result['success']:
                                         logger.info(f"Intent URL sent to Discord: {result.get('url', '')[:80]}...")
                                         state.mark_destination_completed(post['id'], 'x')
