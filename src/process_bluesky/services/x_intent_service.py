@@ -22,6 +22,8 @@ class XIntentService:
     def connect(self) -> bool:
         return True
 
+    DISCORD_EMBED_URL_LIMIT = 2048
+
     def post_intent(
         self, content: str, metadata: Optional[Dict[str, Any]] = None
     ) -> Dict[str, Any]:
@@ -29,12 +31,19 @@ class XIntentService:
 
         preview = content[:200] + ("…" if len(content) > 200 else "")
 
+        if len(intent_url) <= self.DISCORD_EMBED_URL_LIMIT:
+            description = f"```\n{preview}\n```\n**[▶ クリックしてXで投稿]({intent_url})**"
+            embed_url = intent_url
+        else:
+            description = f"```\n{preview}\n```\n⚠️ テキストが長いためリンクを分離\n\n▶ クリックしてXで投稿:\n{intent_url}"
+            embed_url = self.INTENT_BASE
+
         payload = {
             "embeds": [
                 {
                     "title": "🐦 Xに投稿する",
-                    "url": intent_url,
-                    "description": f"```\n{preview}\n```\n**[▶ クリックしてXで投稿]({intent_url})**",
+                    "url": embed_url,
+                    "description": description,
                     "color": self.BLUESKY_BLUE,
                     "footer": {"text": "BlueSky → X 半自動同期"},
                 }
