@@ -113,6 +113,44 @@ class TestDiscordLogFailedPosts:
         assert sm.get_discord_log_failed_count("nonexistent") == 0
 
 
+class TestCompletedDestinationsTrimming:
+    """Regression tests for the cache trimming bug that caused infinite reprocessing."""
+
+    def test_in_progress_post_not_trimmed_from_completed_destinations(self, state_file):
+        """When cache is full, marking a new post's destination must not be lost to trimming."""
+        sm = StateManager(state_file)
+        sm.max_cache_size = 5
+
+        for i in range(5):
+            pid = f"old_post_{i}"
+            sm.mark_destination_completed(pid, "x")
+            sm.mark_destination_completed(pid, "discord_log")
+            sm.add_processed_post(pid, f"2025-07-13T09:0{i}:00Z")
+
+        assert len(sm.processed_posts_cache) == 5
+
+        sm.mark_destination_completed("new_post", "x")
+        assert sm.is_destination_completed("new_post", "x") is True
+
+        sm.mark_destination_completed("new_post", "discord_log")
+        assert sm.is_all_destinations_completed("new_post") is True
+
+    def test_fully_completed_evicted_post_is_trimmed_on_disk(self, state_file):
+        """Fully completed posts evicted from cache are trimmed on disk, not in memory."""
+        sm = StateManager(state_file)
+        sm.max_cache_size = 3
+
+        for i in range(4):
+            pid = f"post_{i}"
+            sm.mark_destination_completed(pid, "x")
+            sm.mark_destination_completed(pid, "discord_log")
+            sm.add_processed_post(pid, f"2025-07-13T09:0{i}:00Z")
+
+        # Reload from disk — evicted post should not be present
+        sm2 = StateManager(state_file)
+        assert "post_0" not in sm2.completed_destinations
+
+
 class TestStatePersistence:
 
     def test_new_fields_persisted(self, state_file):
