@@ -120,11 +120,14 @@ class StateManager:
             for key in keys_to_remove:
                 del self.post_id_mapping[key]
 
-        # Trim completed_destinations to match cache size
+        # Trim completed_destinations for persistence only — never mutate in-memory
+        # dict, because in-progress posts may not be in processed_posts_cache yet.
+        completed_to_save = self.completed_destinations
         if len(self.completed_destinations) > self.max_cache_size:
-            keys_to_keep = set(self.processed_posts_cache[-self.max_cache_size:])
-            self.completed_destinations = {
-                k: v for k, v in self.completed_destinations.items() if k in keys_to_keep
+            keys_in_cache = set(self.processed_posts_cache)
+            completed_to_save = {
+                k: v for k, v in self.completed_destinations.items()
+                if k in keys_in_cache
             }
 
         # Trim x_post_log to last 24 hours
@@ -142,7 +145,7 @@ class StateManager:
             'failed_posts': self.failed_posts,
             'permanently_failed_posts': self.permanently_failed_posts,
             'post_id_mapping': self.post_id_mapping,
-            'completed_destinations': self.completed_destinations,
+            'completed_destinations': completed_to_save,
             'discord_log_failed_posts': self.discord_log_failed_posts,
             'discord_log_permanently_failed_posts': self.discord_log_permanently_failed_posts,
             'x_post_log': self.x_post_log,
