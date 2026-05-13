@@ -63,21 +63,39 @@ class BlueskyInputService(BaseInputService):
             self.connected = True
             return True
 
-        try:
-            self.client = Client()
-            # Increase timeout from default 5s to 30s for better stability
-            if httpx is not None:
-                self.client._request._client = httpx.Client(
-                    timeout=httpx.Timeout(30.0, connect=10.0)
+        backoff_delays = [5, 15, 30]
+        for attempt in range(len(backoff_delays) + 1):
+            try:
+                self.client = Client()
+                if httpx is not None:
+                    self.client._request._client = httpx.Client(
+                        timeout=httpx.Timeout(30.0, connect=10.0)
+                    )
+                self.client.login(self.identifier, self.password)
+                self.connected = True
+                if attempt > 0:
+                    print(f"✅ Connected to Bluesky after {attempt + 1} attempts")
+                else:
+                    print("✅ Connected to Bluesky with 30s timeout")
+                return True
+            except Exception as e:
+                error_str = str(e)
+                is_transient = (
+                    'name resolution' in error_str.lower()
+                    or 'temporary failure' in error_str.lower()
+                    or 'ConnectError' in error_str
+                    or 'NetworkError' in error_str
+                    or 'ConnectionError' in type(e).__name__
+                    or 'TimeoutError' in type(e).__name__
                 )
-            self.client.login(self.identifier, self.password)
-            self.connected = True
-            print("✅ Connected to Bluesky with 30s timeout")
-            return True
-        except Exception as e:
-            print(f"❌ Failed to connect to Bluesky: {str(e)}")
-            self.connected = False
-            return False
+                if is_transient and attempt < len(backoff_delays):
+                    delay = backoff_delays[attempt]
+                    print(f"⚠️ Bluesky接続失敗（{error_str[:80]}）— {delay}秒後にリトライ ({attempt + 1}/{len(backoff_delays)})")
+                    time.sleep(delay)
+                    continue
+                print(f"❌ Failed to connect to Bluesky: {error_str}")
+                self.connected = False
+                return False
 
     def _reconnect(self) -> bool:
         """
