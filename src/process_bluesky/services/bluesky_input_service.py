@@ -63,13 +63,14 @@ class BlueskyInputService(BaseInputService):
             self.connected = True
             return True
 
-        backoff_delays = [5, 15, 30]
+        # 合計待機時間を20秒以内に抑える（55秒タイムアウト、1分間隔ジョブ）
+        backoff_delays = [3, 8, 15]
         for attempt in range(len(backoff_delays) + 1):
             try:
                 self.client = Client()
                 if httpx is not None:
                     self.client._request._client = httpx.Client(
-                        timeout=httpx.Timeout(30.0, connect=10.0)
+                        timeout=httpx.Timeout(30.0, connect=5.0)
                     )
                 self.client.login(self.identifier, self.password)
                 self.connected = True

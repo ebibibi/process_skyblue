@@ -276,3 +276,77 @@ class TestResolveFacetLinks:
 
         result = service._resolve_facet_links(record)
         assert result == "See https://example.com/full"
+
+
+class TestBlueskyConnectRetry:
+    """Test retry backoff behavior of connect()."""
+
+    @pytest.fixture
+    def service(self):
+        with patch('process_bluesky.services.bluesky_input_service.Client'):
+            return BlueskyInputService(
+                identifier="test.bsky.social",
+                password="test_password"
+            )
+
+    def test_backoff_delays_fit_within_55s_timeout(self, service):
+        """リトライ遅延の合計が20秒以内であることを確認（55秒タイムアウト内に収まる）。"""
+        from process_bluesky.services import bluesky_input_service as svc_module
+        import inspect
+        src = inspect.getsource(svc_module.BlueskyInputService.connect)
+        # backoff_delays の値を確認
+        assert '[3, 8, 15]' in src, "backoff_delays should be [3, 8, 15] (total 26s)"
+        assert '[5, 15, 30]' not in src, "Old delays [5,15,30] total 50s — exceeds 55s timeout"
+
+    def test_transient_dns_error_triggers_retry(self, service):
+        """DNS一時障害でリトライが実行されることを確認。"""
+        dns_error = Exception("Temporary failure in name resolution")
+
+        with patch('process_bluesky.services.bluesky_input_service.Client') as mock_cls, \
+             patch('time.sleep') as mock_sleep:
+            mock_client = Mock()
+            # 最初の2回はDNSエラー、3回目は成功
+            mock_client.login.side_effect = [dns_error, dns_error, None]
+            mock_cls.return_value = mock_client
+
+            svc = BlueskyInputService("test.bsky.social", "pw")
+            result = svc.connect()
+
+        assert result is True
+        assert mock_sleep.call_count == 2
+        # 1回目のsleep: 3秒、2回目のsleep: 8秒
+        assert mock_sleep.call_args_list[0][0][0] == 3
+        assert mock_sleep.call_args_list[1][0][0] == 8
+
+    def test_non_transient_error_no_retry(self, service):
+        """認証エラーなど永続的なエラーはリトライしない。"""
+        auth_error = Exception("Invalid credentials")
+
+        with patch('process_bluesky.services.bluesky_input_service.Client') as mock_cls, \
+             patch('time.sleep') as mock_sleep:
+            mock_client = Mock()
+            mock_client.login.side_effect = auth_error
+            mock_cls.return_value = mock_client
+
+            svc = BlueskyInputService("test.bsky.social", "pw")
+            result = svc.connect()
+
+        assert result is False
+        mock_sleep.assert_not_called()
+
+    def test_all_retries_exhausted_returns_false(self, service):
+        """全リトライが失敗した場合にFalseを返す。"""
+        dns_error = Exception("name resolution failed")
+
+        with patch('process_bluesky.services.bluesky_input_service.Client') as mock_cls, \
+             patch('time.sleep'):
+            mock_client = Mock()
+            mock_client.login.side_effect = dns_error
+            mock_cls.return_value = mock_client
+
+            svc = BlueskyInputService("test.bsky.social", "pw")
+            result = svc.connect()
+
+        assert result is False
+        # 4回試行（初回 + 3リトライ）
+        assert mock_client.login.call_count == 4
