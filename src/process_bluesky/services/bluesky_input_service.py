@@ -100,7 +100,7 @@ class BlueskyInputService(BaseInputService):
                 self.client = Client()
                 if httpx is not None:
                     self.client._request._client = httpx.Client(
-                        timeout=httpx.Timeout(30.0, connect=5.0)
+                        timeout=httpx.Timeout(10.0, connect=5.0)
                     )
                 self.client.login(self.identifier, self.password)
                 self.connected = True
