@@ -51,6 +51,37 @@ class BlueskyInputService(BaseInputService):
         self._max_retries = 3
         self._retry_delay = 2  # seconds
     
+    @staticmethod
+    def _describe_exception_chain(e: Exception) -> str:
+        """Build a description from the full exception cause chain."""
+        parts = [f"{type(e).__name__}: {e}"]
+        cause = getattr(e, '__cause__', None) or getattr(e, '__context__', None)
+        seen = {id(e)}
+        while cause and id(cause) not in seen:
+            seen.add(id(cause))
+            parts.append(f"{type(cause).__name__}: {cause}")
+            cause = getattr(cause, '__cause__', None) or getattr(cause, '__context__', None)
+        return " → ".join(parts)
+
+    @staticmethod
+    def _is_transient_error(e: Exception) -> bool:
+        """Check if an exception (including its cause chain) indicates a transient network issue."""
+        TRANSIENT_KEYWORDS = (
+            'name resolution', 'temporary failure', 'connecterror',
+            'networkerror', 'connectionerror', 'timeouterror',
+            'connecttimeout', 'connectionreseterror', 'remotedisconnected',
+        )
+        current = e
+        seen = set()
+        while current and id(current) not in seen:
+            seen.add(id(current))
+            type_name = type(current).__name__
+            combined = f"{type_name}: {current}".lower()
+            if any(kw in combined for kw in TRANSIENT_KEYWORDS):
+                return True
+            current = getattr(current, '__cause__', None) or getattr(current, '__context__', None)
+        return False
+
     def connect(self) -> bool:
         """
         Connect to Bluesky AT Protocol.
@@ -63,7 +94,6 @@ class BlueskyInputService(BaseInputService):
             self.connected = True
             return True
 
-        # 合計待機時間を20秒以内に抑える（55秒タイムアウト、1分間隔ジョブ）
         backoff_delays = [3, 8, 15]
         for attempt in range(len(backoff_delays) + 1):
             try:
@@ -80,21 +110,13 @@ class BlueskyInputService(BaseInputService):
                     print("✅ Connected to Bluesky with 30s timeout")
                 return True
             except Exception as e:
-                error_str = str(e)
-                is_transient = (
-                    'name resolution' in error_str.lower()
-                    or 'temporary failure' in error_str.lower()
-                    or 'ConnectError' in error_str
-                    or 'NetworkError' in error_str
-                    or 'ConnectionError' in type(e).__name__
-                    or 'TimeoutError' in type(e).__name__
-                )
-                if is_transient and attempt < len(backoff_delays):
+                error_desc = self._describe_exception_chain(e)
+                if self._is_transient_error(e) and attempt < len(backoff_delays):
                     delay = backoff_delays[attempt]
-                    print(f"⚠️ Bluesky接続失敗（{error_str[:80]}）— {delay}秒後にリトライ ({attempt + 1}/{len(backoff_delays)})")
+                    print(f"⚠️ Bluesky接続失敗（{error_desc[:120]}）— {delay}秒後にリトライ ({attempt + 1}/{len(backoff_delays)})")
                     time.sleep(delay)
                     continue
-                print(f"❌ Failed to connect to Bluesky: {error_str}")
+                print(f"❌ Failed to connect to Bluesky: {error_desc}")
                 self.connected = False
                 return False
 
@@ -138,46 +160,33 @@ class BlueskyInputService(BaseInputService):
                 return self._fetch_posts(since_timestamp)
             except Exception as e:
                 last_error = e
-                error_str = str(e)
-                error_type = type(e).__name__
-
-                # Check if this is a network error that we should retry
-                is_network_error = (
-                    'NetworkError' in error_str or
-                    'ConnectError' in error_str or
-                    'TimeoutException' in error_str or
-                    'ConnectionError' in error_type or
-                    'Timeout' in error_type
-                )
+                error_desc = self._describe_exception_chain(e)
 
                 # Check for server-side errors (5xx status codes)
-                if 'status_code=502' in error_str or 'status_code=503' in error_str or 'status_code=504' in error_str:
-                    error_type = "UpstreamFailure" if "UpstreamFailure" in error_str else "Server Error"
-                    print(f"⚠️ Bluesky API サーバー側エラー ({error_type}) - リトライ {attempt + 1}/{self._max_retries}")
+                if 'status_code=502' in error_desc or 'status_code=503' in error_desc or 'status_code=504' in error_desc:
+                    label = "UpstreamFailure" if "UpstreamFailure" in error_desc else "Server Error"
+                    print(f"⚠️ Bluesky API サーバー側エラー ({label}) - リトライ {attempt + 1}/{self._max_retries}")
                     if attempt < self._max_retries - 1:
                         time.sleep(self._retry_delay * (attempt + 1))
                         continue
-                    raise BlueskyServerError(f"Bluesky API server error: {error_type}") from e
-                elif 'status_code=429' in error_str:
+                    raise BlueskyServerError(f"Bluesky API server error: {label}") from e
+                elif 'status_code=429' in error_desc:
                     print(f"⚠️ Bluesky API レートリミット到達")
                     raise BlueskyRateLimitError("Bluesky API rate limit exceeded") from e
-                elif 'status_code=401' in error_str or 'status_code=403' in error_str:
+                elif 'status_code=401' in error_desc or 'status_code=403' in error_desc:
                     print(f"❌ Bluesky API 認証エラー")
                     raise BlueskyAuthError("Bluesky API authentication error") from e
-                elif is_network_error:
-                    print(f"⚠️ ネットワークエラー - リトライ {attempt + 1}/{self._max_retries}: {error_str[:100]}")
+                elif self._is_transient_error(e):
+                    print(f"⚠️ ネットワークエラー - リトライ {attempt + 1}/{self._max_retries}: {error_desc[:120]}")
                     if attempt < self._max_retries - 1:
                         time.sleep(self._retry_delay * (attempt + 1))
-                        # Try to reconnect on network errors
-                        if attempt == 1:  # Reconnect on second retry
+                        if attempt == 1:
                             self._reconnect()
                         continue
-                    error_detail = error_str if error_str else error_type
-                    raise RuntimeError(f"Bluesky API error after {self._max_retries} retries: {error_detail}") from e
+                    raise RuntimeError(f"Bluesky API error after {self._max_retries} retries: {error_desc}") from e
                 else:
-                    error_detail = error_str if error_str else error_type
-                    print(f"❌ Error getting posts from Bluesky: {error_detail}")
-                    raise RuntimeError(f"Bluesky API error: {error_detail}") from e
+                    print(f"❌ Error getting posts from Bluesky: {error_desc}")
+                    raise RuntimeError(f"Bluesky API error: {error_desc}") from e
 
         # Should not reach here, but just in case
         if last_error:

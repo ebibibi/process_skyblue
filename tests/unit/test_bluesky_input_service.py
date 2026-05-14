@@ -350,3 +350,88 @@ class TestBlueskyConnectRetry:
         assert result is False
         # 4回試行（初回 + 3リトライ）
         assert mock_client.login.call_count == 4
+
+    def test_empty_str_exception_with_transient_cause_triggers_retry(self, service):
+        """str(e) is empty but __cause__ is a transient error — should still retry."""
+        inner = ConnectionError("Connection refused")
+        outer = Exception()
+        outer.__cause__ = inner
+
+        with patch('process_bluesky.services.bluesky_input_service.Client') as mock_cls, \
+             patch('time.sleep') as mock_sleep:
+            mock_client = Mock()
+            mock_client.login.side_effect = [outer, None]
+            mock_cls.return_value = mock_client
+
+            svc = BlueskyInputService("test.bsky.social", "pw")
+            result = svc.connect()
+
+        assert result is True
+        assert mock_sleep.call_count == 1
+
+    def test_nested_cause_chain_detected_as_transient(self, service):
+        """Deeply nested __cause__ with transient error should retry."""
+        root = TimeoutError("connect timed out")
+        mid = RuntimeError("wrapped")
+        mid.__cause__ = root
+        outer = Exception()
+        outer.__cause__ = mid
+
+        with patch('process_bluesky.services.bluesky_input_service.Client') as mock_cls, \
+             patch('time.sleep'):
+            mock_client = Mock()
+            mock_client.login.side_effect = [outer, None]
+            mock_cls.return_value = mock_client
+
+            svc = BlueskyInputService("test.bsky.social", "pw")
+            result = svc.connect()
+
+        assert result is True
+
+
+class TestExceptionChainHelpers:
+    """Tests for _describe_exception_chain and _is_transient_error."""
+
+    def test_describe_simple_exception(self):
+        e = ValueError("bad value")
+        desc = BlueskyInputService._describe_exception_chain(e)
+        assert "ValueError" in desc
+        assert "bad value" in desc
+
+    def test_describe_chained_exception(self):
+        inner = ConnectionError("refused")
+        outer = RuntimeError("wrapper")
+        outer.__cause__ = inner
+        desc = BlueskyInputService._describe_exception_chain(outer)
+        assert "RuntimeError" in desc
+        assert "ConnectionError" in desc
+        assert "refused" in desc
+
+    def test_describe_empty_str_exception(self):
+        e = Exception()
+        desc = BlueskyInputService._describe_exception_chain(e)
+        assert "Exception" in desc
+
+    def test_is_transient_connection_error(self):
+        assert BlueskyInputService._is_transient_error(ConnectionError("refused"))
+
+    def test_is_transient_timeout_error(self):
+        assert BlueskyInputService._is_transient_error(TimeoutError("timed out"))
+
+    def test_is_transient_dns_in_message(self):
+        assert BlueskyInputService._is_transient_error(Exception("Temporary failure in name resolution"))
+
+    def test_is_transient_nested_cause(self):
+        inner = ConnectionError("reset")
+        outer = Exception()
+        outer.__cause__ = inner
+        assert BlueskyInputService._is_transient_error(outer)
+
+    def test_not_transient_auth_error(self):
+        assert not BlueskyInputService._is_transient_error(Exception("Invalid credentials"))
+
+    def test_not_transient_empty_exception(self):
+        assert not BlueskyInputService._is_transient_error(Exception())
+
+    def test_is_transient_network_error_keyword(self):
+        assert BlueskyInputService._is_transient_error(Exception("NetworkError: connection dropped"))

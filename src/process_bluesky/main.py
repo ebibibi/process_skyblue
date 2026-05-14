@@ -249,9 +249,8 @@ def main():
                     )
                     sys.exit(1)
                 except Exception as e:
-                    error_msg = str(e) if str(e) else f"{type(e).__name__}: {repr(e)}"
-                    # Check if this is a network error
-                    is_network_error = 'NetworkError' in error_msg
+                    error_msg = BlueskyInputService._describe_exception_chain(e)
+                    is_network_error = BlueskyInputService._is_transient_error(e)
                     if is_network_error:
                         consecutive_network_errors += 1
                         if consecutive_network_errors >= NETWORK_ERROR_THRESHOLD:
