@@ -3,7 +3,9 @@ Bluesky Input Service for Process BlueSky.
 
 Handles connection to Bluesky AT Protocol and retrieval of posts.
 """
+import sys
 import time
+from pathlib import Path
 from typing import List, Dict, Any, Optional
 from datetime import datetime
 from process_bluesky.services.base_input_service import BaseInputService
@@ -12,9 +14,14 @@ try:
     from atproto import Client
     import httpx
 except ImportError:
-    # For testing when atproto is not available
     Client = None
     httpx = None
+
+sys.path.insert(0, str(Path.home() / "lib"))
+try:
+    from bsky_client import create_session as _bsky_create_session
+except ImportError:
+    _bsky_create_session = None
 
 
 class BlueskyServerError(Exception):
@@ -82,9 +89,28 @@ class BlueskyInputService(BaseInputService):
             current = getattr(current, '__cause__', None) or getattr(current, '__context__', None)
         return False
 
+    def _resolve_pds_endpoint(self, did: str) -> str:
+        """Resolve PDS endpoint from DID via plc.directory."""
+        import json
+        import urllib.request
+        try:
+            req = urllib.request.Request(f"https://plc.directory/{did}")
+            with urllib.request.urlopen(req, timeout=10) as r:
+                doc = json.loads(r.read())
+            for svc in doc.get("service", []):
+                if svc.get("type") == "AtprotoPersonalDataServer":
+                    return svc["serviceEndpoint"]
+        except Exception:
+            pass
+        return "https://bsky.social"
+
     def connect(self) -> bool:
         """
         Connect to Bluesky AT Protocol.
+
+        Uses bsky_client (urllib) for session creation to avoid httpx 403 blocks
+        from AWS WAF on bsky.social. The atproto SDK is only used for PDS API
+        calls (get_author_feed etc.) which go to the user's PDS directly.
 
         Returns:
             True if connection successful
@@ -94,6 +120,40 @@ class BlueskyInputService(BaseInputService):
             self.connected = True
             return True
 
+        if _bsky_create_session is not None:
+            return self._connect_via_bsky_client()
+
+        return self._connect_via_sdk()
+
+    def _connect_via_bsky_client(self) -> bool:
+        """Connect using bsky_client.py (urllib + session cache)."""
+        try:
+            sess = _bsky_create_session(self.identifier, self.password)
+            pds_endpoint = self._resolve_pds_endpoint(sess['did'])
+
+            self.client = Client()
+            if httpx is not None:
+                self.client._request._client = httpx.Client(
+                    timeout=httpx.Timeout(10.0, connect=5.0)
+                )
+
+            session_string = ":::".join([
+                sess['handle'], sess['did'],
+                sess['token'], sess['refresh_token'],
+                pds_endpoint,
+            ])
+            self.client.login(session_string=session_string)
+            self.connected = True
+            print(f"✅ Connected to Bluesky via session cache (PDS: {pds_endpoint})")
+            return True
+        except Exception as e:
+            error_desc = self._describe_exception_chain(e)
+            print(f"❌ Failed to connect to Bluesky: {error_desc}")
+            self.connected = False
+            return False
+
+    def _connect_via_sdk(self) -> bool:
+        """Fallback: connect using atproto SDK login directly."""
         backoff_delays = [3, 8, 15]
         for attempt in range(len(backoff_delays) + 1):
             try:
