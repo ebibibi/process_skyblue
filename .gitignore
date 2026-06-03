@@ -16,3 +16,5 @@ data/state.json
 .DS_Store
 .vscode/
 *.swp
+
+data/*.db
