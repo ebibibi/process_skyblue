@@ -437,10 +437,22 @@ class StateManager:
         """Check if a destination is completed for a post."""
         return destination in self.completed_destinations.get(post_id, [])
 
+    def is_destination_terminal(self, post_id: str, destination: str) -> bool:
+        """Check whether a destination needs no further processing."""
+        if self.is_destination_completed(post_id, destination):
+            return True
+        if destination == "x":
+            return self.is_post_permanently_failed(post_id)
+        if destination == "discord_log":
+            return self.is_discord_log_permanently_failed(post_id)
+        return False
+
     def is_all_destinations_completed(self, post_id: str) -> bool:
-        """Check if all destinations are completed for a post."""
-        completed = self.completed_destinations.get(post_id, [])
-        return all(d in completed for d in self.ALL_DESTINATIONS)
+        """Check if all destinations have reached a terminal state."""
+        return all(
+            self.is_destination_terminal(post_id, destination)
+            for destination in self.ALL_DESTINATIONS
+        )
 
     def add_discord_log_failed_post(self, post_id: str, timestamp: str, error: str) -> bool:
         """
