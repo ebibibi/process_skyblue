@@ -59,6 +59,44 @@ class TestDestinationTracking:
         sm.mark_destination_completed("post_a", "discord_log")
         assert sm.is_all_destinations_completed("post_a") is True
 
+    def test_x_permanent_failure_and_discord_success_is_terminal(self, state_file):
+        """A permanent X failure must not cause successful Discord reposts."""
+        sm = StateManager(state_file)
+        for attempt in range(sm.max_retry_count):
+            sm.add_failed_post(
+                "post_a",
+                "2025-07-13T10:00:00Z",
+                f"X error {attempt + 1}",
+            )
+
+        sm.mark_destination_completed("post_a", "discord_log")
+
+        assert sm.is_all_destinations_completed("post_a") is True
+        sm.add_processed_post("post_a", "2025-07-13T10:00:00Z")
+
+        reloaded = StateManager(state_file)
+        assert reloaded.is_post_processed("post_a") is True
+        assert reloaded.is_destination_completed("post_a", "discord_log") is True
+
+    def test_discord_permanent_failure_and_x_success_is_terminal(self, state_file):
+        """A permanent Discord failure must not cause successful X reposts."""
+        sm = StateManager(state_file)
+        for attempt in range(sm.max_retry_count):
+            sm.add_discord_log_failed_post(
+                "post_a",
+                "2025-07-13T10:00:00Z",
+                f"Discord error {attempt + 1}",
+            )
+
+        sm.mark_destination_completed("post_a", "x")
+
+        assert sm.is_all_destinations_completed("post_a") is True
+        sm.add_processed_post("post_a", "2025-07-13T10:00:00Z")
+
+        reloaded = StateManager(state_file)
+        assert reloaded.is_post_processed("post_a") is True
+        assert reloaded.is_destination_completed("post_a", "x") is True
+
     def test_backward_compatibility_legacy_posts(self, state_file_with_legacy_posts):
         sm = StateManager(state_file_with_legacy_posts)
         # Legacy posts should be treated as all-destinations-completed

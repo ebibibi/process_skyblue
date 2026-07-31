@@ -288,13 +288,9 @@ def main():
                             continue
 
                         # Determine per-destination completion status
-                        x_done = (
-                            state.is_destination_completed(post['id'], 'x')
-                            or state.is_post_permanently_failed(post['id'])
-                        )
+                        x_done = state.is_destination_terminal(post['id'], 'x')
                         discord_done = (
-                            state.is_destination_completed(post['id'], 'discord_log')
-                            or state.is_discord_log_permanently_failed(post['id'])
+                            state.is_destination_terminal(post['id'], 'discord_log')
                             or not discord_log_service
                         )
 
