@@ -1,8 +1,10 @@
 # Process BlueSky
 
-**Automatic cross-posting service from BlueSky to X (Twitter) and Discord.**
+**Automatic mirroring service from BlueSky to a Discord channel.**
 
-Runs as a single-shot process (one invocation = one check cycle). Call it every 60 seconds with cron, systemd timer, or your own scheduler to continuously mirror your BlueSky posts to X and Discord.
+Runs as a single-shot process (one invocation = one check cycle). Call it every 60 seconds with cron, systemd timer, or your own scheduler to continuously mirror your BlueSky posts to Discord.
+
+> **X (Twitter) output was removed in 2026-07.** This project used to cross-post to X as well, through the X API and later through a Web Intent link. Both paths are gone: there is no X code, no X credentials, and no X configuration left. If you need the old behaviour, use a tag before the removal commit.
 
 [日本語](#japanese) | [中文](#chinese)
 
@@ -10,28 +12,18 @@ Runs as a single-shot process (one invocation = one check cycle). Call it every 
 
 ## Features
 
-- 🔁 **BlueSky → X cross-posting** — Post once on BlueSky, automatically published to X
-- 🖼️ **Image support** — Transfers image attachments from BlueSky to X (up to 4 images)
-- 🧵 **Thread splitting** — Long posts are automatically split into Twitter threads (Free plan)
-- ✨ **X Premium support** — Up to 25,000 characters in a single post
-- 🔀 **Thread merging** — Multiple BlueSky thread posts merged into one X post (X Premium)
-- 📢 **Discord logging** — Optional cross-posting to your own Discord server via Webhook
-- 🔄 **Auto-retry** — Failed posts are retried automatically (up to 3 times)
-- 📡 **Error notifications** — Network errors and posting failures reported to Discord
+- 🦋 **BlueSky → Discord mirroring** — Post once on BlueSky, automatically mirrored to your Discord channel
+- 🖼️ **Image support** — Transfers image attachments from BlueSky
+- 🔄 **Auto-retry** — Failed posts are retried automatically (up to 3 times), then marked permanently failed so they are never retried forever
+- 🛑 **Runaway protection** — A circuit breaker caps how many posts can be sent per run and per 30-minute window, and duplicate content is skipped outright
+- 📡 **Error notifications** — Network errors and posting failures reported to a separate Discord webhook
 
 ## How it works
 
 ```
 Post on BlueSky
     ↓ (auto-detected within 60 seconds)
-X post  +  Discord message (optional)
-```
-
-X Premium thread merging:
-```
-BlueSky: Part 1 → Part 2 → Part 3
-    ↓
-X:      "Part 1\n\nPart 2\n\nPart 3" (single post)
+Discord message
 ```
 
 ## Setup
@@ -40,8 +32,8 @@ X:      "Part 1\n\nPart 2\n\nPart 3" (single post)
 
 - Python 3.10+
 - BlueSky account
-- X (Twitter) developer account and API keys — [X Developer Portal](https://developer.twitter.com/en/portal/dashboard)
 - Discord Webhook URL for error notifications — [How to create](https://support.discord.com/hc/en-us/articles/228383668)
+- Discord Webhook URL for the mirror channel
 
 ### 1. Clone the repository
 
@@ -63,20 +55,11 @@ Edit `.env` and fill in your credentials:
 BLUESKY_IDENTIFIER=your-account.bsky.social
 BLUESKY_PASSWORD=your-app-password   # App Password recommended
 
-# X (Twitter) API
-X_API_KEY=your-api-key
-X_API_SECRET=your-api-secret
-X_ACCESS_TOKEN=your-access-token
-X_ACCESS_TOKEN_SECRET=your-access-token-secret
-
 # Discord — error notifications (required)
 DISCORD_WEBHOOK_URL=https://discord.com/api/webhooks/...
 
-# Discord — log channel on your own server (optional)
+# Discord — mirror channel (required; without it there is nothing to do)
 DISCORD_LOG_WEBHOOK_URL=https://discord.com/api/webhooks/...
-
-# X Premium: 25,000 char limit + thread merging. Set false for Free plan.
-X_PREMIUM=true
 ```
 
 > **BlueSky App Password**: For security, use an [App Password](https://bsky.app/settings/app-passwords) instead of your account password.
@@ -98,7 +81,7 @@ Expected output:
 
 ```
 🚀 Initializing Process BlueSky...
-X mode: Premium (25000 chars)
+Output: Discord えびログ only (X output removed)
 Connecting to Bluesky...
 All services connected successfully!
 Starting single-run check...
@@ -132,25 +115,26 @@ docker run -d --name process-bluesky --env-file .env \
 |----------|----------|---------|-------------|
 | `BLUESKY_IDENTIFIER` | ✅ | — | BlueSky handle (e.g. `user.bsky.social`) |
 | `BLUESKY_PASSWORD` | ✅ | — | BlueSky password (App Password recommended) |
-| `X_API_KEY` | ✅ | — | X API Consumer Key |
-| `X_API_SECRET` | ✅ | — | X API Consumer Secret |
-| `X_ACCESS_TOKEN` | ✅ | — | X API Access Token |
-| `X_ACCESS_TOKEN_SECRET` | ✅ | — | X API Access Token Secret |
 | `DISCORD_WEBHOOK_URL` | ✅ | — | Discord Webhook for error/success notifications |
-| `DISCORD_LOG_WEBHOOK_URL` | — | disabled | Discord Webhook to log all posts to your server |
+| `DISCORD_LOG_WEBHOOK_URL` | ✅ | — | Discord Webhook of the channel posts are mirrored to |
 | `POLLING_INTERVAL` | — | `60` | Polling interval in seconds |
-| `X_PREMIUM` | — | `true` | X Premium mode (`true` / `false`) |
 | `SKIP_POST_IDS` | — | — | Comma-separated BlueSky post IDs to skip (debug) |
 
-## X API rate limits
+## Runaway protection
 
-| Tier | Posts/month | Posts/day |
-|------|-------------|-----------|
-| Free | 500 | 17 |
-| Basic | 3,000 | — |
-| Pro | 300,000 | — |
+Mirroring the same batch over and over is the failure mode this project has actually hit, so the circuit breaker guards against it:
 
-The Free tier has a 17 posts/day limit. Be mindful of your posting frequency.
+| Guard | Limit | Behaviour on breach |
+|-------|-------|---------------------|
+| Posts per run | 30 | Breaker trips, run aborts |
+| Posts per 30-minute window | 40 | Breaker trips, run aborts |
+| Duplicate content (last 100 posts) | — | That post is skipped and marked done |
+
+A tripped breaker must be reset manually:
+
+```bash
+PYTHONPATH=src python3 -c "from process_bluesky.core.state_manager import StateManager; StateManager().reset_circuit_breaker()"
+```
 
 ## Development
 
@@ -166,15 +150,12 @@ PYTHONPATH=src pytest tests/ -v
 src/process_bluesky/
 ├── core/
 │   ├── config_manager.py    # Config loading and validation (Pydantic)
-│   ├── state_manager.py     # State persistence and retry tracking
+│   ├── state_manager.py     # State persistence, retry tracking, circuit breaker
 │   └── logger.py            # Logging with Discord notification integration
 ├── services/
 │   ├── bluesky_input_service.py   # BlueSky AT Protocol API
-│   ├── x_output_service.py        # X API v2 (media upload: v1.1)
-│   ├── discord_log_service.py     # Discord Webhook (cross-posting)
+│   ├── discord_log_service.py     # Discord Webhook (mirror channel)
 │   └── discord_notifier.py        # Discord Webhook (error notifications)
-├── utils/
-│   └── content_processor.py  # Character counting, URL encoding, thread splitting
 └── main.py                   # Entry point — single-shot check-and-exit
 ```
 
@@ -186,22 +167,23 @@ MIT License
 
 ## Author
 
-[@ebibibibibibi.bsky.social](https://bsky.app/profile/ebibibibibibi.bsky.social) / [@ebibibi on X](https://x.com/ebibibi)
+[@ebibibibibibi.bsky.social](https://bsky.app/profile/ebibibibibibi.bsky.social)
 
 ---
 
 <a name="japanese"></a>
 ## 日本語
 
-BlueSkyへの投稿をX（Twitter）とDiscordに自動クロスポストするサービスです。
+BlueSkyへの投稿をDiscordチャンネルに自動ミラーするサービスです。
+
+**2026年7月にX（Twitter）への投稿機能を削除しました。** APIモードもWeb Intentモードも、コード・認証情報・設定ごと削除済みです。
 
 ### 特徴
 
-- BlueSkyに投稿するだけでXにも自動投稿
-- 画像添付対応（最大4枚）
-- X Freeプランはスレッド分割、X Premiumは25,000文字まで単一ポスト
-- BlueSkyのスレッド投稿をX側では1ポストにマージ（X Premium時）
-- 自分のDiscordサーバーへのログ投稿（任意）
+- BlueSkyに投稿するだけでDiscordにも自動ミラー
+- 画像添付対応
+- 失敗時の自動リトライ（最大3回）と恒久失敗マーク
+- 暴走防止のサーキットブレーカー（実行あたり30件 / 30分あたり40件 / 重複内容はスキップ）
 
 ### セットアップ
 
@@ -218,15 +200,16 @@ BlueSkyへの投稿をX（Twitter）とDiscordに自動クロスポストする�
 <a name="chinese"></a>
 ## 中文
 
-将 BlueSky 帖子自动交叉发布到 X（Twitter）和 Discord 的服务。
+将 BlueSky 帖子自动镜像到 Discord 频道的服务。
+
+**2026年7月已移除对 X（Twitter）的发布功能**，包括 API 模式和 Web Intent 模式的代码、凭据与配置。
 
 ### 功能特点
 
-- 在 BlueSky 发帖后自动发布到 X
-- 支持图片附件（最多4张）
-- X Free 计划自动分割长帖，X Premium 支持最多 25,000 字符
-- X Premium 模式下将 BlueSky 串联帖子合并为单条 X 帖子
-- 可选将帖子记录到您自己的 Discord 服务器
+- 在 BlueSky 发帖后自动镜像到 Discord
+- 支持图片附件
+- 失败自动重试（最多3次），超过后标记为永久失败
+- 熔断保护（每次运行30条 / 每30分钟40条 / 重复内容跳过）
 
 ### 快速开始
 

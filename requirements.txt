@@ -7,9 +7,6 @@ requests==2.31.0
 # Bluesky
 atproto>=0.0.55
 
-# X (Twitter)
-tweepy==4.14.0
-
 # Testing
 pytest==7.4.3
 pytest-mock==3.12.0
