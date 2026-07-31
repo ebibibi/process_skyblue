@@ -15,26 +15,9 @@ class Config(BaseModel):
     
     bluesky_identifier: str
     bluesky_password: str
-    x_api_key: str
-    x_api_secret: str
-    x_access_token: str
-    x_access_token_secret: str
-    x_oauth2_client_id: Optional[str] = None
-    x_oauth2_client_secret: Optional[str] = None
     discord_webhook_url: str
     discord_log_webhook_url: Optional[str] = None
     polling_interval: int = 60
-    x_premium: bool = True
-    x_post_mode: str = "api"
-    discord_x_intent_webhook_url: Optional[str] = None
-    discord_mention_user_id: Optional[str] = None
-
-    @field_validator('x_post_mode')
-    @classmethod
-    def validate_x_post_mode(cls, v):
-        if v not in ("api", "intent"):
-            raise ValueError('X_POST_MODE must be "api" or "intent"')
-        return v
 
     @field_validator('polling_interval')
     @classmethod
@@ -55,7 +38,7 @@ class Config(BaseModel):
             raise ValueError('Invalid Discord webhook URL format')
         return v
 
-    @field_validator('discord_log_webhook_url', 'discord_x_intent_webhook_url')
+    @field_validator('discord_log_webhook_url')
     @classmethod
     def validate_optional_webhook_url(cls, v):
         if v is not None and not (
@@ -90,19 +73,9 @@ class ConfigManager:
             self._config = Config(
                 bluesky_identifier=self._get_required_env('BLUESKY_IDENTIFIER'),
                 bluesky_password=self._get_required_env('BLUESKY_PASSWORD'),
-                x_api_key=self._get_required_env('X_API_KEY'),
-                x_api_secret=self._get_required_env('X_API_SECRET'),
-                x_access_token=self._get_required_env('X_ACCESS_TOKEN'),
-                x_access_token_secret=self._get_required_env('X_ACCESS_TOKEN_SECRET'),
-                x_oauth2_client_id=os.getenv('X_OAUTH2_CLIENT_ID'),
-                x_oauth2_client_secret=os.getenv('X_OAUTH2_CLIENT_SECRET'),
                 discord_webhook_url=self._get_required_env('DISCORD_WEBHOOK_URL'),
                 discord_log_webhook_url=os.getenv('DISCORD_LOG_WEBHOOK_URL'),
                 polling_interval=int(os.getenv('POLLING_INTERVAL', '60')),
-                x_premium=os.getenv('X_PREMIUM', 'true').lower() == 'true',
-                x_post_mode=os.getenv('X_POST_MODE', 'api'),
-                discord_x_intent_webhook_url=os.getenv('DISCORD_X_INTENT_WEBHOOK_URL'),
-                discord_mention_user_id=os.getenv('DISCORD_MENTION_USER_ID')
             )
         except ValidationError as e:
             raise ValueError(f"Configuration validation error: {e}")
@@ -136,36 +109,6 @@ class ConfigManager:
         return self._config.bluesky_password
     
     @property
-    def x_api_key(self) -> str:
-        """Get X API key."""
-        return self._config.x_api_key
-    
-    @property
-    def x_api_secret(self) -> str:
-        """Get X API secret."""
-        return self._config.x_api_secret
-    
-    @property
-    def x_access_token(self) -> str:
-        """Get X access token."""
-        return self._config.x_access_token
-    
-    @property
-    def x_access_token_secret(self) -> str:
-        """Get X access token secret."""
-        return self._config.x_access_token_secret
-    
-    @property
-    def x_oauth2_client_id(self) -> Optional[str]:
-        """Get X OAuth 2.0 client ID."""
-        return self._config.x_oauth2_client_id
-    
-    @property
-    def x_oauth2_client_secret(self) -> Optional[str]:
-        """Get X OAuth 2.0 client secret."""
-        return self._config.x_oauth2_client_secret
-    
-    @property
     def discord_webhook_url(self) -> str:
         """Get Discord webhook URL."""
         return self._config.discord_webhook_url
@@ -179,20 +122,3 @@ class ConfigManager:
     def polling_interval(self) -> int:
         """Get polling interval in seconds."""
         return self._config.polling_interval
-
-    @property
-    def x_premium(self) -> bool:
-        """Get X Premium mode flag."""
-        return self._config.x_premium
-
-    @property
-    def x_post_mode(self) -> str:
-        return self._config.x_post_mode
-
-    @property
-    def discord_x_intent_webhook_url(self) -> Optional[str]:
-        return self._config.discord_x_intent_webhook_url
-
-    @property
-    def discord_mention_user_id(self) -> Optional[str]:
-        return self._config.discord_mention_user_id

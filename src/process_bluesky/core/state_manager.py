@@ -11,7 +11,7 @@ from typing import Optional
 
 
 class CircuitBreakerTripped(Exception):
-    """Raised when the X posting circuit breaker is tripped."""
+    """Raised when the posting circuit breaker is tripped."""
     pass
 
 
@@ -23,7 +23,7 @@ class DuplicateContentSkipped(Exception):
 class StateManager:
     """Manages application state persistence."""
 
-    ALL_DESTINATIONS = ["x", "discord_log"]
+    ALL_DESTINATIONS = ["discord_log"]
 
     def __init__(self, state_file_path: str = "data/state.json"):
         """
@@ -36,23 +36,22 @@ class StateManager:
         self.last_processed_at: Optional[str] = None
         self.last_check: Optional[str] = None
         self.processed_posts_cache: list = []  # Recent processed post IDs
-        self.failed_posts: dict = {}  # Failed posts with retry counts: {post_id: {"count": N, "timestamp": str, "last_error": str}}
-        self.permanently_failed_posts: list = []  # Posts that exceeded max retries
-        self.post_id_mapping: dict = {}  # Bluesky post ID -> Twitter tweet ID mapping for threading
-        self.completed_destinations: dict = {}  # {post_id: ["x", "discord_log"]}
+        self.completed_destinations: dict = {}  # {post_id: ["discord_log"]}
         self.discord_log_failed_posts: dict = {}  # Same structure as failed_posts
         self.discord_log_permanently_failed_posts: list = []  # Same structure as permanently_failed_posts
         self.max_cache_size = 1000  # Keep last 1000 post IDs
         self.max_retry_count = 3  # Max retries before marking as permanently failed
-        self.x_post_log: list = []  # Timestamps of recent X posts for circuit breaker
-        self.x_content_hashes: list = []  # Recent content hashes for duplicate detection
+        self.post_log: list = []  # Timestamps of recent posts for circuit breaker
+        self.content_hashes: list = []  # Recent content hashes for duplicate detection
         self.circuit_breaker_tripped: bool = False
         self.circuit_breaker_tripped_at: Optional[str] = None
         self.circuit_breaker_reason: Optional[str] = None
         # Circuit breaker thresholds
-        self.cb_max_posts_per_window = 10  # Max X posts in the time window
+        # Sized above a normal BlueSky burst (a day's worth is ~30 posts) but far
+        # below a runaway loop, which re-sends the same batch every minute.
+        self.cb_max_posts_per_window = 40  # Max posts in the time window
         self.cb_window_minutes = 30  # Time window in minutes
-        self.cb_max_posts_per_run = 15  # Max X posts in a single run
+        self.cb_max_posts_per_run = 30  # Max posts in a single run
         self._posts_this_run = 0
         self._load_state()
     
@@ -65,16 +64,16 @@ class StateManager:
                     self.last_processed_at = state_data.get('last_processed_at')
                     self.last_check = state_data.get('last_check')
                     self.processed_posts_cache = state_data.get('processed_posts_cache', [])
-                    self.failed_posts = state_data.get('failed_posts', {})
-                    self.permanently_failed_posts = state_data.get('permanently_failed_posts', [])
-                    self.post_id_mapping = state_data.get('post_id_mapping', {})
                     self.completed_destinations = state_data.get('completed_destinations', {})
                     self.discord_log_failed_posts = state_data.get('discord_log_failed_posts', {})
                     self.discord_log_permanently_failed_posts = state_data.get(
                         'discord_log_permanently_failed_posts', []
                     )
-                    self.x_post_log = state_data.get('x_post_log', [])
-                    self.x_content_hashes = state_data.get('x_content_hashes', [])
+                    # Fall back to the pre-X-removal key names for existing state files
+                    self.post_log = state_data.get('post_log', state_data.get('x_post_log', []))
+                    self.content_hashes = state_data.get(
+                        'content_hashes', state_data.get('x_content_hashes', [])
+                    )
                     self.circuit_breaker_tripped = state_data.get('circuit_breaker_tripped', False)
                     self.circuit_breaker_tripped_at = state_data.get('circuit_breaker_tripped_at')
                     self.circuit_breaker_reason = state_data.get('circuit_breaker_reason')
@@ -113,13 +112,6 @@ class StateManager:
         if len(self.processed_posts_cache) > self.max_cache_size:
             self.processed_posts_cache = self.processed_posts_cache[-self.max_cache_size:]
 
-        # Keep post_id_mapping size limited (keep last 500 mappings)
-        if len(self.post_id_mapping) > 500:
-            # Remove oldest entries (assuming dict maintains insertion order in Python 3.7+)
-            keys_to_remove = list(self.post_id_mapping.keys())[:-500]
-            for key in keys_to_remove:
-                del self.post_id_mapping[key]
-
         # Trim completed_destinations for persistence only — never mutate in-memory
         # dict, because in-progress posts may not be in processed_posts_cache yet.
         completed_to_save = self.completed_destinations
@@ -130,26 +122,23 @@ class StateManager:
                 if k in keys_in_cache
             }
 
-        # Trim x_post_log to last 24 hours
+        # Trim post_log to last 24 hours
         cutoff = (datetime.now(timezone.utc) - timedelta(hours=24)).isoformat()
-        self.x_post_log = [ts for ts in self.x_post_log if ts > cutoff]
+        self.post_log = [ts for ts in self.post_log if ts > cutoff]
 
-        # Trim x_content_hashes to last 100
-        if len(self.x_content_hashes) > 100:
-            self.x_content_hashes = self.x_content_hashes[-100:]
+        # Trim content_hashes to last 100
+        if len(self.content_hashes) > 100:
+            self.content_hashes = self.content_hashes[-100:]
 
         state_data = {
             'last_processed_at': self.last_processed_at,
             'last_check': self.last_check,
             'processed_posts_cache': self.processed_posts_cache,
-            'failed_posts': self.failed_posts,
-            'permanently_failed_posts': self.permanently_failed_posts,
-            'post_id_mapping': self.post_id_mapping,
             'completed_destinations': completed_to_save,
             'discord_log_failed_posts': self.discord_log_failed_posts,
             'discord_log_permanently_failed_posts': self.discord_log_permanently_failed_posts,
-            'x_post_log': self.x_post_log,
-            'x_content_hashes': self.x_content_hashes,
+            'post_log': self.post_log,
+            'content_hashes': self.content_hashes,
             'circuit_breaker_tripped': self.circuit_breaker_tripped,
             'circuit_breaker_tripped_at': self.circuit_breaker_tripped_at,
             'circuit_breaker_reason': self.circuit_breaker_reason,
@@ -267,162 +256,6 @@ class StateManager:
         """
         return post_id in self.processed_posts_cache
 
-    def add_failed_post(self, post_id: str, timestamp: str, error: str) -> bool:
-        """
-        Add or update a failed post with retry count.
-
-        Args:
-            post_id: The ID of the failed post
-            timestamp: The timestamp of the post
-            error: The error message
-
-        Returns:
-            True if post exceeded max retries and was moved to permanently_failed
-        """
-        if post_id in self.failed_posts:
-            self.failed_posts[post_id]["count"] += 1
-            self.failed_posts[post_id]["last_error"] = error
-        else:
-            self.failed_posts[post_id] = {
-                "count": 1,
-                "timestamp": timestamp,
-                "last_error": error
-            }
-
-        # Check if exceeded max retries
-        if self.failed_posts[post_id]["count"] >= self.max_retry_count:
-            # Move to permanently failed
-            self.permanently_failed_posts.append({
-                "post_id": post_id,
-                "timestamp": timestamp,
-                "last_error": error,
-                "failed_at": datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')
-            })
-            del self.failed_posts[post_id]
-            self._save_state()
-            return True
-
-        self._save_state()
-        return False
-
-    def is_post_failed(self, post_id: str) -> bool:
-        """
-        Check if a post is in the failed queue.
-
-        Args:
-            post_id: The ID of the post to check
-
-        Returns:
-            True if the post is in failed queue
-        """
-        return post_id in self.failed_posts
-
-    def is_post_permanently_failed(self, post_id: str) -> bool:
-        """
-        Check if a post has permanently failed.
-
-        Args:
-            post_id: The ID of the post to check
-
-        Returns:
-            True if the post is permanently failed
-        """
-        return any(p["post_id"] == post_id for p in self.permanently_failed_posts)
-
-    def get_failed_post_count(self, post_id: str) -> int:
-        """
-        Get the retry count for a failed post.
-
-        Args:
-            post_id: The ID of the post
-
-        Returns:
-            The retry count, or 0 if not in failed queue
-        """
-        if post_id in self.failed_posts:
-            return self.failed_posts[post_id]["count"]
-        return 0
-
-    def remove_from_failed(self, post_id: str) -> None:
-        """
-        Remove a post from the failed queue (e.g., when retry succeeds).
-
-        Args:
-            post_id: The ID of the post to remove
-        """
-        if post_id in self.failed_posts:
-            del self.failed_posts[post_id]
-            self._save_state()
-
-    def get_posts_to_retry(self) -> list:
-        """
-        Get list of posts that should be retried.
-
-        Returns:
-            List of post IDs that are in failed queue and should be retried
-        """
-        return list(self.failed_posts.keys())
-
-    def add_post_mapping(self, bluesky_post_id: str, twitter_tweet_id: str) -> None:
-        """
-        Add a mapping from Bluesky post ID to Twitter tweet ID.
-
-        Args:
-            bluesky_post_id: The Bluesky post URI
-            twitter_tweet_id: The corresponding Twitter tweet ID
-        """
-        self.post_id_mapping[bluesky_post_id] = twitter_tweet_id
-        self._save_state()
-
-    def get_twitter_id_for_bluesky_post(self, bluesky_post_id: str) -> Optional[str]:
-        """
-        Get the Twitter tweet ID for a given Bluesky post ID.
-
-        Args:
-            bluesky_post_id: The Bluesky post URI to look up
-
-        Returns:
-            The Twitter tweet ID if found, None otherwise
-        """
-        return self.post_id_mapping.get(bluesky_post_id)
-
-    def add_post_mapping_with_last_tweet(
-        self, bluesky_post_id: str, first_tweet_id: str, last_tweet_id: str
-    ) -> None:
-        """
-        Add a mapping from Bluesky post ID to Twitter tweet IDs.
-        Stores both first and last tweet ID for thread continuation.
-
-        Args:
-            bluesky_post_id: The Bluesky post URI
-            first_tweet_id: The first tweet ID in the thread
-            last_tweet_id: The last tweet ID (for reply continuation)
-        """
-        self.post_id_mapping[bluesky_post_id] = {
-            "first": first_tweet_id,
-            "last": last_tweet_id
-        }
-        self._save_state()
-
-    def get_last_twitter_id_for_bluesky_post(self, bluesky_post_id: str) -> Optional[str]:
-        """
-        Get the last Twitter tweet ID for a given Bluesky post ID.
-        Used for continuing threads.
-
-        Args:
-            bluesky_post_id: The Bluesky post URI to look up
-
-        Returns:
-            The last Twitter tweet ID if found, None otherwise
-        """
-        mapping = self.post_id_mapping.get(bluesky_post_id)
-        if mapping is None:
-            return None
-        if isinstance(mapping, dict):
-            return mapping.get("last")
-        # Legacy format: just a single ID
-        return mapping
-
     # --- Per-destination tracking methods ---
 
     def mark_destination_completed(self, post_id: str, destination: str) -> None:
@@ -441,8 +274,6 @@ class StateManager:
         """Check whether a destination needs no further processing."""
         if self.is_destination_completed(post_id, destination):
             return True
-        if destination == "x":
-            return self.is_post_permanently_failed(post_id)
         if destination == "discord_log":
             return self.is_discord_log_permanently_failed(post_id)
         return False
@@ -509,7 +340,7 @@ class StateManager:
 
     def check_circuit_breaker(self) -> None:
         """
-        Check if the circuit breaker is tripped. Call before any X posting.
+        Check if the circuit breaker is tripped. Call before any posting.
 
         Raises:
             CircuitBreakerTripped: If the breaker is currently tripped.
@@ -522,7 +353,7 @@ class StateManager:
 
     def pre_post_check(self, content: str) -> None:
         """
-        Run all safety checks before posting to X.
+        Run all safety checks before posting.
 
         Checks:
         1. Circuit breaker not already tripped
@@ -538,7 +369,7 @@ class StateManager:
         # Check rolling window rate limit
         now = datetime.now(timezone.utc)
         window_start = (now - timedelta(minutes=self.cb_window_minutes)).isoformat()
-        recent_posts = [ts for ts in self.x_post_log if ts > window_start]
+        recent_posts = [ts for ts in self.post_log if ts > window_start]
         if len(recent_posts) >= self.cb_max_posts_per_window:
             self._trip_breaker(
                 f"Rolling window limit exceeded: {len(recent_posts)} posts "
@@ -556,21 +387,21 @@ class StateManager:
         # Check duplicate content — skip the post instead of tripping the breaker
         import hashlib
         content_hash = hashlib.sha256(content.encode('utf-8')).hexdigest()[:16]
-        if content_hash in self.x_content_hashes:
+        if content_hash in self.content_hashes:
             raise DuplicateContentSkipped(
                 f"Duplicate content detected: '{content[:50]}...' "
                 f"was already posted recently"
             )
 
-    def record_x_post(self, content: str) -> None:
-        """Record a successful X post for circuit breaker tracking."""
+    def record_post(self, content: str) -> None:
+        """Record a successful post for circuit breaker tracking."""
         now = datetime.now(timezone.utc).isoformat()
-        self.x_post_log.append(now)
+        self.post_log.append(now)
         self._posts_this_run += 1
 
         import hashlib
         content_hash = hashlib.sha256(content.encode('utf-8')).hexdigest()[:16]
-        self.x_content_hashes.append(content_hash)
+        self.content_hashes.append(content_hash)
 
         self._save_state()
 

@@ -2,55 +2,41 @@
 
 ## プロジェクト概要
 
-BlueSkyへのポストをトリガーとしてX（Twitter）・Discordへのクロスポストを自動化するシステム。
-Dockerコンテナとして常駐し、BlueSky APIをポーリングして新規投稿を検出・転送する。
+BlueSkyへのポストをトリガーとしてDiscord（えびログ）へのミラーを自動化するシステム。
+BlueSky APIをポーリングして新規投稿を検出・転送する。
+
+> **2026-07-31: X（Twitter）出力を全廃した。** X APIモードもWeb Intentモードも、コード・
+> 認証情報・設定ごと削除済み。宛先はDiscordえびログ1本だけになった。
 
 ---
 
 ## 機能仕様
 
-### 1. BlueSky → X クロスポスト
+### 1. BlueSky → Discord えびログ ミラー
 
 #### 基本動作
 - 設定したBlueSkyアカウントを1分間隔でポーリング監視
-- 新規ポストを検出したらXに自動投稿
-- 画像添付に対応（最大4枚）
-- 重複投稿防止: 処理済みポストIDをキャッシュ（最大1000件）
-- 状態管理: `data/state.json` で処理済みIDとX/Discord各宛先の完了状態を管理
-
-#### 文字数制限対応
-
-| モード | X最大文字数 | 動作 |
-|--------|------------|------|
-| X Free（`X_PREMIUM=false`） | 280文字 | 超過時にスレッド分割 |
-| X Premium（`X_PREMIUM=true`） | 25,000文字 | 単一ポストに収める |
-
-> **注意**: 日本語等のCJK文字はTwitterカウント上2文字として換算される。
-
-#### X Premium スレッドマージ機能（`X_PREMIUM=true` 時）
-
-BlueSkyでスレッド（連投）したポストを、X側では1つのポストにまとめる：
-
-```
-BlueSky: Part 1 → Part 2 → Part 3  （3件のリプライ連鎖）
-    ↓ X Premium merge
-X:      「Part 1\n\nPart 2\n\nPart 3」 （1件のポスト）
-```
-
-- **同一バッチ内のみマージ**: 同じポーリングサイクルで取得したポスト群の中でチェーンを検出
-- `_group_thread_posts()` でリプライ連鎖（`reply_to` フィールド）をたどってグループ化
-- プライマリ（最初の投稿）がXポストを実行、セカンダリはそのX IDに紐付けられる
-- プライマリが失敗した場合、セカンダリは次サイクルで再グループ化して再試行
-
-#### スレッド分割（X Free時 / 長文時）
-
-X Freeモードで280文字を超える場合、または単一ポストに収まらない場合はXのスレッドとして分割投稿。
-
-### 2. BlueSky → Discord えびログ クロスポスト
-
-- Discord Webhook URLを設定することで有効化（`DISCORD_LOG_WEBHOOK_URL`）
-- X投稿とは独立して宛先ごとにリトライ状態を管理
+- 新規ポストを検出したらDiscordえびログに自動投稿
 - 画像はDiscordに直接貼り付け
+- 重複投稿防止: 処理済みポストIDをキャッシュ（最大1000件）
+- 状態管理: `data/state.json` で処理済みIDと宛先の完了状態を管理
+- `DISCORD_LOG_WEBHOOK_URL` 未設定なら出力先が無いので起動時に終了する
+
+### 2. 暴走防止（サーキットブレーカー）
+
+同じバッチを再送し続ける暴走が実際に起きたため、以下のガードを常時適用する。
+
+| ガード | 上限 | 超過時 |
+|--------|------|--------|
+| 1実行あたりの投稿数 | 30件 | ブレーカー作動・実行中断 |
+| 30分あたりの投稿数 | 40件 | ブレーカー作動・実行中断 |
+| 直近100件との内容重複 | - | そのポストをスキップして完了扱い |
+
+作動後は手動リセットが必要:
+
+```bash
+PYTHONPATH=src python3 -c "from process_bluesky.core.state_manager import StateManager; StateManager().reset_circuit_breaker()"
+```
 
 ### 3. エラーハンドリング・リトライ
 
@@ -60,8 +46,7 @@ X Freeモードで280文字を超える場合、または単一ポストに収�
 | BlueSky APIレートリミット | 同上 |
 | BlueSky API認証エラー | ログ出力・プロセス終了 |
 | ネットワークエラー | 5回連続でDiscord通知、回復時もDiscord通知 |
-| X投稿失敗 | 最大3回リトライ後に永続失敗としてマーク |
-| Discord投稿失敗 | 同上 |
+| Discord投稿失敗 | 最大3回リトライ後に永続失敗としてマーク（無限再送を防ぐ） |
 
 ---
 
@@ -77,11 +62,7 @@ X Freeモードで280文字を超える場合、または単一ポストに収�
      │  新規ポスト検出
      ▼
 [Main Orchestrator]  ←→  [StateManager]  ←→  data/state.json
-     │
-     ├─→ [ContentProcessor]  （文字数チェック・URLエンコード・スレッド分割）
-     │
-     ├─→ [XOutputService]      →  [X API v2]
-     │
+     │                        （サーキットブレーカー・重複検出）
      └─→ [DiscordEbilogService] →  [Discord Webhook]
 
 [DiscordNotifier]  →  [Discord Webhook（エラー通知用）]
@@ -94,17 +75,14 @@ process_bluesky/
 ├── src/process_bluesky/
 │   ├── core/
 │   │   ├── config_manager.py    # 環境変数・バリデーション（Pydantic）
-│   │   ├── state_manager.py     # 処理済み状態・リトライ管理
+│   │   ├── state_manager.py     # 処理済み状態・リトライ・サーキットブレーカー
 │   │   └── logger.py            # ログ出力（Discord通知連携）
 │   ├── services/
 │   │   ├── bluesky_input_service.py   # BlueSky ATプロトコルAPI
-│   │   ├── x_output_service.py        # X API v2（画像: v1.1）
 │   │   ├── discord_log_service.py  # Discord Webhook
 │   │   ├── discord_notifier.py        # エラー通知用Discord
 │   │   ├── base_input_service.py      # InputService 抽象基底
 │   │   └── base_output_service.py     # OutputService 抽象基底
-│   ├── utils/
-│   │   └── content_processor.py  # 文字数計算・URL処理・スレッド分割
 │   └── main.py                   # エントリポイント・メインループ
 ├── tests/                        # pytest テスト群
 ├── data/                         # state.json（実行時データ、gitignore済み）
@@ -122,16 +100,9 @@ process_bluesky/
 |--------|------|------|
 | `BLUESKY_IDENTIFIER` | ✅ | BlueSky ID（例: `user.bsky.social`） |
 | `BLUESKY_PASSWORD` | ✅ | BlueSky パスワード（App Password推奨） |
-| `X_API_KEY` | ✅ | X API Consumer Key |
-| `X_API_SECRET` | ✅ | X API Consumer Secret |
-| `X_ACCESS_TOKEN` | ✅ | X API Access Token |
-| `X_ACCESS_TOKEN_SECRET` | ✅ | X API Access Token Secret |
-| `X_OAUTH2_CLIENT_ID` | - | X OAuth 2.0 Client ID（将来用） |
-| `X_OAUTH2_CLIENT_SECRET` | - | X OAuth 2.0 Client Secret（将来用） |
 | `DISCORD_WEBHOOK_URL` | ✅ | Discord Webhookエラー通知用 |
-| `DISCORD_LOG_WEBHOOK_URL` | - | DiscordログWebhook（省略で無効） |
+| `DISCORD_LOG_WEBHOOK_URL` | ✅ | ミラー先のDiscord Webhook（唯一の出力先） |
 | `POLLING_INTERVAL` | - | ポーリング間隔（秒、デフォルト: 60） |
-| `X_PREMIUM` | - | X Premium有無（`true`/`false`、デフォルト: `true`） |
 | `SKIP_POST_IDS` | - | スキップするBlueSkyポストID（カンマ区切り、デバッグ用） |
 
 ---
@@ -163,7 +134,6 @@ docker run -d --name process-bluesky \
 
 - **言語**: Python 3.9
 - **BlueSky API**: ATプロトコル（`atproto` ライブラリ）
-- **X API**: v2 ツイート投稿、v1.1 メディアアップロード（`tweepy` ライブラリ）
 - **設定管理**: Pydantic v2 + python-dotenv
 - **テスト**: pytest + pytest-mock
 - **コンテナ**: Docker（python:3.9-slim ベース）

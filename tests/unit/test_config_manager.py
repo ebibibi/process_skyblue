@@ -16,10 +16,6 @@ class TestConfigManager:
         env_vars = {
             'BLUESKY_IDENTIFIER': 'test.bsky.social',
             'BLUESKY_PASSWORD': 'test_password',
-            'X_API_KEY': 'test_api_key',
-            'X_API_SECRET': 'test_api_secret',
-            'X_ACCESS_TOKEN': 'test_access_token',
-            'X_ACCESS_TOKEN_SECRET': 'test_access_token_secret',
             'DISCORD_WEBHOOK_URL': 'https://discord.com/api/webhooks/test',
             'POLLING_INTERVAL': '60'
         }
@@ -29,10 +25,6 @@ class TestConfigManager:
             
             assert config.bluesky_identifier == 'test.bsky.social'
             assert config.bluesky_password == 'test_password'
-            assert config.x_api_key == 'test_api_key'
-            assert config.x_api_secret == 'test_api_secret'
-            assert config.x_access_token == 'test_access_token'
-            assert config.x_access_token_secret == 'test_access_token_secret'
             assert config.discord_webhook_url == 'https://discord.com/api/webhooks/test'
             assert config.polling_interval == 60
     
@@ -41,10 +33,6 @@ class TestConfigManager:
         env_content = """
 BLUESKY_IDENTIFIER=test.bsky.social
 BLUESKY_PASSWORD=test_password
-X_API_KEY=test_api_key
-X_API_SECRET=test_api_secret
-X_ACCESS_TOKEN=test_access_token
-X_ACCESS_TOKEN_SECRET=test_access_token_secret
 DISCORD_WEBHOOK_URL=https://discord.com/api/webhooks/test
 POLLING_INTERVAL=60
         """
@@ -53,10 +41,6 @@ POLLING_INTERVAL=60
         env_vars = {
             'BLUESKY_IDENTIFIER': 'test.bsky.social',
             'BLUESKY_PASSWORD': 'test_password',
-            'X_API_KEY': 'test_api_key',
-            'X_API_SECRET': 'test_api_secret',
-            'X_ACCESS_TOKEN': 'test_access_token',
-            'X_ACCESS_TOKEN_SECRET': 'test_access_token_secret',
             'DISCORD_WEBHOOK_URL': 'https://discord.com/api/webhooks/test',
             'POLLING_INTERVAL': '60'
         }
@@ -81,10 +65,6 @@ POLLING_INTERVAL=60
         env_vars = {
             'BLUESKY_IDENTIFIER': 'test.bsky.social',
             'BLUESKY_PASSWORD': 'test_password',
-            'X_API_KEY': 'test_api_key',
-            'X_API_SECRET': 'test_api_secret',
-            'X_ACCESS_TOKEN': 'test_access_token',
-            'X_ACCESS_TOKEN_SECRET': 'test_access_token_secret',
             'DISCORD_WEBHOOK_URL': 'https://discord.com/api/webhooks/test',
             'POLLING_INTERVAL': '60'
         }

@@ -46,29 +46,29 @@ class TestPrePostCheck:
         state.pre_post_check("Hello world")  # Should not raise
 
     def test_duplicate_content_skips_post(self, state):
-        state.record_x_post("Same content here")
+        state.record_post("Same content here")
         with pytest.raises(DuplicateContentSkipped, match="Duplicate content"):
             state.pre_post_check("Same content here")
         # Circuit breaker should NOT be tripped for duplicates
         assert not state.circuit_breaker_tripped
 
     def test_different_content_passes(self, state):
-        state.record_x_post("First post")
+        state.record_post("First post")
         state.pre_post_check("Second post")  # Should not raise
 
     def test_rolling_window_limit(self, state):
         state.cb_max_posts_per_window = 3
         state.cb_window_minutes = 30
         for i in range(3):
-            state.record_x_post(f"Post number {i}")
+            state.record_post(f"Post number {i}")
         with pytest.raises(CircuitBreakerTripped, match="Rolling window limit"):
             state.pre_post_check("One too many")
 
     def test_per_run_limit(self, state):
         state.cb_max_posts_per_run = 2
         state.cb_max_posts_per_window = 100  # Don't hit this one
-        state.record_x_post("Run post 1")
-        state.record_x_post("Run post 2")
+        state.record_post("Run post 1")
+        state.record_post("Run post 2")
         with pytest.raises(CircuitBreakerTripped, match="Per-run limit"):
             state.pre_post_check("Run post 3")
 
@@ -77,7 +77,7 @@ class TestPrePostCheck:
         state.cb_window_minutes = 30
         # Inject old timestamps (2 hours ago)
         old_time = (datetime.now(timezone.utc) - timedelta(hours=2)).isoformat()
-        state.x_post_log = [old_time] * 5
+        state.post_log = [old_time] * 5
         state._save_state()
         # Should pass because those are outside the window
         state.pre_post_check("New post")  # Should not raise
@@ -85,38 +85,38 @@ class TestPrePostCheck:
 
 class TestRecordXPost:
     def test_records_timestamp_and_hash(self, state):
-        assert len(state.x_post_log) == 0
-        assert len(state.x_content_hashes) == 0
-        state.record_x_post("Test content")
-        assert len(state.x_post_log) == 1
-        assert len(state.x_content_hashes) == 1
+        assert len(state.post_log) == 0
+        assert len(state.content_hashes) == 0
+        state.record_post("Test content")
+        assert len(state.post_log) == 1
+        assert len(state.content_hashes) == 1
 
     def test_increments_run_counter(self, state):
         assert state._posts_this_run == 0
-        state.record_x_post("Post 1")
+        state.record_post("Post 1")
         assert state._posts_this_run == 1
-        state.record_x_post("Post 2")
+        state.record_post("Post 2")
         assert state._posts_this_run == 2
 
     def test_persists_across_loads(self, state):
-        state.record_x_post("Persisted post")
+        state.record_post("Persisted post")
         state2 = StateManager(state_file_path=state.state_file_path)
-        assert len(state2.x_post_log) == 1
-        assert len(state2.x_content_hashes) == 1
+        assert len(state2.post_log) == 1
+        assert len(state2.content_hashes) == 1
         # But run counter resets (new process)
         assert state2._posts_this_run == 0
 
     def test_content_hash_trimmed_to_100(self, state):
         for i in range(120):
-            state.x_content_hashes.append(f"hash_{i}")
+            state.content_hashes.append(f"hash_{i}")
         state._save_state()
         state2 = StateManager(state_file_path=state.state_file_path)
-        assert len(state2.x_content_hashes) == 100
+        assert len(state2.content_hashes) == 100
 
     def test_post_log_trimmed_to_24h(self, state):
         old = (datetime.now(timezone.utc) - timedelta(hours=48)).isoformat()
         recent = datetime.now(timezone.utc).isoformat()
-        state.x_post_log = [old, old, recent]
+        state.post_log = [old, old, recent]
         state._save_state()
         state2 = StateManager(state_file_path=state.state_file_path)
-        assert len(state2.x_post_log) == 1  # Only the recent one
+        assert len(state2.post_log) == 1  # Only the recent one
