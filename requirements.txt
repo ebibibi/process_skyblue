@@ -2,7 +2,7 @@
 python-dotenv==1.2.2
 pydantic>=2.7.0
 schedule==1.2.0
-requests==2.31.0
+requests==2.33.0
 
 # Bluesky
 atproto>=0.0.55
