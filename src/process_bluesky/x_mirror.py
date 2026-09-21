@@ -20,6 +20,7 @@ from process_bluesky.services.x_input_service import (
     XCreditsDepletedError,
     XInputService,
 )
+from process_bluesky.services.loop_guard import fetch_recent_bluesky_texts, is_echo
 from process_bluesky.services.x_text import build_text
 
 logger = logging.getLogger(__name__)
@@ -128,6 +129,16 @@ def run() -> int:
         logger.info("nothing new")
         return 0
 
+    # Posts the author relayed to X by hand must not come back. Fetched once
+    # per run: a guard that fails must not stop the mirror, but it must also
+    # not silently let echoes through, so a failure aborts the run instead.
+    bluesky_handle = _require("BLUESKY_MIRROR_HANDLE")
+    try:
+        recent_bluesky = fetch_recent_bluesky_texts(bluesky_handle)
+    except Exception as exc:  # noqa: BLE001 - see comment above
+        logger.error("could not read BlueSky feed for loop guard: %s", exc)
+        return 1
+
     output = BlueskyOutputService(
         identifier=_require("BLUESKY_IDENTIFIER"),
         password=_require("BLUESKY_PASSWORD"),
@@ -138,7 +149,15 @@ def run() -> int:
         return 1
 
     posted = 0
+    skipped = 0
     for post in to_mirror:
+        if is_echo(post["content"], recent_bluesky):
+            # Move past it, otherwise every later run reconsiders the same post.
+            state.advance_watermark(post["id"])
+            skipped += 1
+            logger.info("skipped %s: already on BlueSky (hand-relayed to X)", post["id"])
+            continue
+
         text = build_text(post, screen_name)
         result = output.post_content(
             text,
@@ -156,7 +175,12 @@ def run() -> int:
         posted += 1
         logger.info("mirrored %s -> %s", post["id"], result["id"])
 
-    logger.info("mirrored %d/%d posts", posted, len(to_mirror))
+    logger.info(
+        "mirrored %d, skipped %d as echoes, of %d candidates",
+        posted,
+        skipped,
+        len(to_mirror),
+    )
 
     try:
         balance = x_service.get_credit_balance()
