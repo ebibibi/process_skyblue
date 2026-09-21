@@ -12,8 +12,20 @@ class TestBlueskyInputService:
     
     @pytest.fixture
     def mock_client(self):
-        """Mock atproto client."""
-        with patch('process_bluesky.services.bluesky_input_service.Client') as mock_client_class:
+        """Mock atproto client, and force connect() down the SDK path.
+
+        connect() prefers _bsky_create_session when it is importable, and that
+        helper opens a real session against bsky.social. Patching Client alone
+        leaves that branch live: the mock is never consulted, the test reaches
+        the network, and it fails on the remote rate limiter rather than on the
+        code under test.
+        """
+        with patch(
+            'process_bluesky.services.bluesky_input_service._bsky_create_session',
+            None,
+        ), patch(
+            'process_bluesky.services.bluesky_input_service.Client'
+        ) as mock_client_class:
             mock_client = Mock()
             mock_client_class.return_value = mock_client
             yield mock_client
@@ -182,6 +194,15 @@ class TestBlueskyInputService:
 class TestResolveFacetLinks:
     """Test cases for _resolve_facet_links method."""
 
+    @pytest.fixture(autouse=True)
+    def _offline(self):
+        """Keep every test in this class off the network. See mock_client above."""
+        with patch(
+            'process_bluesky.services.bluesky_input_service._bsky_create_session',
+            None,
+        ):
+            yield
+
     @pytest.fixture
     def service(self):
         with patch('process_bluesky.services.bluesky_input_service.Client'):
@@ -281,6 +302,15 @@ class TestResolveFacetLinks:
 class TestBlueskyConnectRetry:
     """Test retry backoff behavior of connect()."""
 
+    @pytest.fixture(autouse=True)
+    def _offline(self):
+        """Keep every test in this class off the network. See mock_client above."""
+        with patch(
+            'process_bluesky.services.bluesky_input_service._bsky_create_session',
+            None,
+        ):
+            yield
+
     @pytest.fixture
     def service(self):
         with patch('process_bluesky.services.bluesky_input_service.Client'):
@@ -289,14 +319,28 @@ class TestBlueskyConnectRetry:
                 password="test_password"
             )
 
-    def test_backoff_delays_fit_within_55s_timeout(self, service):
-        """リトライ遅延の合計が20秒以内であることを確認（55秒タイムアウト内に収まる）。"""
-        from process_bluesky.services import bluesky_input_service as svc_module
-        import inspect
-        src = inspect.getsource(svc_module.BlueskyInputService.connect)
-        # backoff_delays の値を確認
-        assert '[3, 8, 15]' in src, "backoff_delays should be [3, 8, 15] (total 26s)"
-        assert '[5, 15, 30]' not in src, "Old delays [5,15,30] total 50s — exceeds 55s timeout"
+    def test_backoff_delays_fit_within_55s_timeout(self):
+        """リトライ遅延の合計が55秒タイムアウトに収まることを、実際の待ち時間で確認する。
+
+        以前はこの検査が connect() のソース文字列に '[3, 8, 15]' が含まれるかを
+        見ていた。リトライ処理が _connect_via_sdk へ移った時点で、その文字列は
+        connect() から消え、検査は「遅延が長すぎる」ではなく「文字列が無い」で
+        落ちるようになっていた。移動しただけで壊れる検査は、実際に何が起きるかを
+        見ていない。ここでは sleep に渡った値そのものを検査する。
+        """
+        transient = Exception("Temporary failure in name resolution")
+
+        with patch('process_bluesky.services.bluesky_input_service.Client') as mock_cls, \
+             patch('time.sleep') as mock_sleep:
+            mock_client = Mock()
+            mock_client.login.side_effect = transient
+            mock_cls.return_value = mock_client
+
+            BlueskyInputService("test.bsky.social", "pw").connect()
+
+        delays = [call[0][0] for call in mock_sleep.call_args_list]
+        assert delays == [3, 8, 15]
+        assert sum(delays) < 55
 
     def test_transient_dns_error_triggers_retry(self, service):
         """DNS一時障害でリトライが実行されることを確認。"""
