@@ -5,11 +5,10 @@
 # このスクリプトは対話入力（エコーなし）で受け取り、一時ファイルへ書いてから
 # mv で原子的に置き換える。値は一度も画面に出さず、シェル履歴にも残らない。
 #
-#   ssh moviegen
-#   bash /home/ebi/process_bluesky/scripts/set_x_credentials.sh
+#   X_ENV_FILE=/path/to/.env bash scripts/set_x_credentials.sh
 set -euo pipefail
 
-ENV_FILE="${X_ENV_FILE:-/home/ebi/process_bluesky/.env}"
+ENV_FILE="${X_ENV_FILE:?X_ENV_FILE is not set}"
 KEYS=(X_CONSUMER_KEY X_CONSUMER_SECRET X_CLIENT_ID X_CLIENT_SECRET X_ACCESS_TOKEN X_REFRESH_TOKEN)
 
 [ -f "$ENV_FILE" ] || { echo "ERROR: $ENV_FILE が無い" >&2; exit 1; }

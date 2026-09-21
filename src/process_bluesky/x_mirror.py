@@ -87,8 +87,10 @@ def run() -> int:
         level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s"
     )
 
-    env_path = os.environ.get("X_ENV_FILE", "/home/ebi/process_bluesky/.env")
-    screen_name = os.environ.get("X_SCREEN_NAME", "ebi")
+    # No defaults: a wrong path silently refreshes tokens into the wrong file,
+    # and a wrong screen name produces source links that 404.
+    env_path = _require("X_ENV_FILE")
+    screen_name = _require("X_SCREEN_NAME")
 
     x_service = XInputService(
         user_id=_require("X_USER_ID"),
