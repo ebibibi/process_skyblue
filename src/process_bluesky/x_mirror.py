@@ -20,6 +20,7 @@ from process_bluesky.services.x_input_service import (
     XCreditsDepletedError,
     XInputService,
 )
+from process_bluesky.services.link_guard import repeats_link
 from process_bluesky.services.loop_guard import fetch_recent_bluesky_texts, is_echo
 from process_bluesky.services.x_text import build_text
 
@@ -148,6 +149,11 @@ def run() -> int:
         logger.error("could not connect to BlueSky")
         return 1
 
+    # The newest BlueSky post, which is what a new post would sit directly
+    # under. Updated as this run posts, so a run mirroring several posts about
+    # one link still produces only the first of them.
+    latest_bluesky = recent_bluesky[0] if recent_bluesky else None
+
     posted = 0
     skipped = 0
     for post in to_mirror:
@@ -159,6 +165,19 @@ def run() -> int:
             continue
 
         text = build_text(post, screen_name)
+
+        # Different words, same link, one post apart: the echo guard compares
+        # text and cannot see this. Two consecutive posts carrying one link
+        # read as spam, so the second is dropped rather than reworded.
+        if repeats_link(text, latest_bluesky):
+            state.advance_watermark(post["id"])
+            skipped += 1
+            logger.info(
+                "skipped %s: its link is already in the newest BlueSky post",
+                post["id"],
+            )
+            continue
+
         result = output.post_content(
             text,
             metadata={
@@ -172,11 +191,12 @@ def run() -> int:
             logger.error("stopping after failure on %s: %s", post["id"], result["error"])
             break
         state.advance_watermark(post["id"])
+        latest_bluesky = text
         posted += 1
         logger.info("mirrored %s -> %s", post["id"], result["id"])
 
     logger.info(
-        "mirrored %d, skipped %d as echoes, of %d candidates",
+        "mirrored %d, skipped %d as echoes or repeated links, of %d candidates",
         posted,
         skipped,
         len(to_mirror),
