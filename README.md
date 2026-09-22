@@ -1,10 +1,10 @@
 # Process BlueSky
 
-**Automatic mirroring service from BlueSky to a Discord channel.**
+**Mirroring service for BlueSky, Discord, and owned X posts.**
 
-Runs as a single-shot process (one invocation = one check cycle). Call it every 60 seconds with cron, systemd timer, or your own scheduler to continuously mirror your BlueSky posts to Discord.
+Runs as single-shot processes (one invocation = one check cycle). The main entry point mirrors BlueSky to Discord. A separate X input path mirrors the authenticated owner's X posts to BlueSky and exposes those posts to downstream content workflows.
 
-> **X (Twitter) output was removed in 2026-07.** This project used to cross-post to X as well, through the X API and later through a Web Intent link. Both paths are gone: there is no X code, no X credentials, and no X configuration left. If you need the old behaviour, use a tag before the removal commit.
+> **X output remains removed.** This project does not post to X. It only reads the authenticated owner's posts through X's user-context API.
 
 [日本語](#japanese) | [中文](#chinese)
 
@@ -17,6 +17,7 @@ Runs as a single-shot process (one invocation = one check cycle). Call it every 
 - 🔄 **Auto-retry** — Failed posts are retried automatically (up to 3 times), then marked permanently failed so they are never retried forever
 - 🛑 **Runaway protection** — A circuit breaker caps how many posts can be sent per run and per 30-minute window, and duplicate content is skipped outright
 - 📡 **Error notifications** — Network errors and posting failures reported to a separate Discord webhook
+- ✍️ **Read-only X export** — Emits recent owned X posts as JSON or Markdown for writing and video-planning workflows
 
 ## How it works
 
@@ -91,7 +92,18 @@ Disconnecting from services...
 Process BlueSky stopped
 ```
 
-### 5. Schedule repeated execution
+### 5. Export recent owned X posts
+
+After adding the optional `X_*` OAuth 2.0 values shown in `.env.example`, run:
+
+```bash
+PYTHONPATH=src python3 -m process_bluesky.x_recent \
+  --env-file /absolute/path/to/.env --days 30 --limit 50 --format markdown
+```
+
+The command only calls `GET /2/users/{id}/tweets`; it never posts, likes, follows, or deletes. Use OAuth user-context tokens for the developer app owner so X classifies the requests as lower-cost Owned Reads. JSON is the default format for machine consumers.
+
+### 6. Schedule repeated execution
 
 The process exits after each check. Use your preferred scheduler to call it every 60 seconds:
 
@@ -119,6 +131,10 @@ docker run -d --name process-bluesky --env-file .env \
 | `DISCORD_LOG_WEBHOOK_URL` | ✅ | — | Discord Webhook of the channel posts are mirrored to |
 | `POLLING_INTERVAL` | — | `60` | Polling interval in seconds |
 | `SKIP_POST_IDS` | — | — | Comma-separated BlueSky post IDs to skip (debug) |
+| `X_USER_ID` / `X_SCREEN_NAME` | X input only | — | Authenticated owner's numeric ID and screen name |
+| `X_CLIENT_ID` / `X_CLIENT_SECRET` | X input only | — | OAuth 2.0 application credentials |
+| `X_ACCESS_TOKEN` / `X_REFRESH_TOKEN` | X input only | — | OAuth 2.0 user-context tokens; refreshed tokens are persisted to the env file |
+| `X_ENV_FILE` | X mirror only | — | Absolute dotenv path used for safe token persistence |
 
 ## Runaway protection
 
@@ -176,7 +192,7 @@ MIT License
 
 BlueSkyへの投稿をDiscordチャンネルに自動ミラーするサービスです。
 
-**2026年7月にX（Twitter）への投稿機能を削除しました。** APIモードもWeb Intentモードも、コード・認証情報・設定ごと削除済みです。
+**X（Twitter）への投稿機能は削除済みです。** 現在は本人アカウントのポストをユーザー認証APIで読み取り、BlueSkyへのミラーとコンテンツ制作向けの読み取り専用エクスポートに利用します。Xへの投稿・いいね・フォロー・削除は行いません。
 
 ### 特徴
 
@@ -192,6 +208,7 @@ BlueSkyへの投稿をDiscordチャンネルに自動ミラーするサービス
 3. `pip install -r requirements.txt` で依存パッケージをインストール
 4. `source .env && PYTHONPATH=src python3 -m process_bluesky.main` で動作確認
 5. cron または systemd timer で60秒ごとに実行するよう設定
+6. コンテンツ素材として使う場合は `PYTHONPATH=src python3 -m process_bluesky.x_recent --env-file /absolute/path/to/.env --days 30 --format markdown` で直近の本人ポストを取得
 
 詳細は上記の英語セクションを参照してください。
 

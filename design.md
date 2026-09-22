@@ -5,8 +5,8 @@
 BlueSkyへのポストをトリガーとしてDiscord（えびログ）へのミラーを自動化するシステム。
 BlueSky APIをポーリングして新規投稿を検出・転送する。
 
-> **2026-07-31: X（Twitter）出力を全廃した。** X APIモードもWeb Intentモードも、コード・
-> 認証情報・設定ごと削除済み。宛先はDiscordえびログ1本だけになった。
+> **X（Twitter）出力は全廃したまま。** 2026-09-21から本人のXポストをユーザー認証で読み取る入力経路を追加した。
+> Xへの投稿・いいね・フォロー・削除は行わない。読み取ったポストはBlueSkyミラーと、コンテンツ制作向けの読み取り専用エクスポートにだけ使う。
 
 ---
 
@@ -22,7 +22,16 @@ BlueSky APIをポーリングして新規投稿を検出・転送する。
 - 状態管理: `data/state.json` で処理済みIDと宛先の完了状態を管理
 - `DISCORD_LOG_WEBHOOK_URL` 未設定なら出力先が無いので起動時に終了する
 
-### 2. 暴走防止（サーキットブレーカー）
+### 2. X本人ポスト入力
+
+- OAuth 2.0ユーザーコンテキストで `GET /2/users/{id}/tweets` のみを呼ぶ
+- 開発者アプリ所有者本人のポストを読むことで、XのOwned Read料金を使う
+- `x_mirror.py`: 新着をBlueSkyへスレッド構造付きでミラーする。初回はwatermarkだけを設定し、過去分を流さない
+- `x_recent.py`: 直近N日・最大N件をJSONまたはMarkdownで標準出力し、note執筆やYouTube企画の入力にする
+- OAuth refresh tokenは単回利用のため、更新成功時は新しいtoken pairをdotenvへ原子的に保存してから採用する
+- Xへの書き込み操作は実装しない
+
+### 3. 暴走防止（サーキットブレーカー）
 
 同じバッチを再送し続ける暴走が実際に起きたため、以下のガードを常時適用する。
 
@@ -38,7 +47,7 @@ BlueSky APIをポーリングして新規投稿を検出・転送する。
 PYTHONPATH=src python3 -c "from process_bluesky.core.state_manager import StateManager; StateManager().reset_circuit_breaker()"
 ```
 
-### 3. エラーハンドリング・リトライ
+### 4. エラーハンドリング・リトライ
 
 | エラー種別 | 動作 |
 |-----------|------|
@@ -66,6 +75,11 @@ PYTHONPATH=src python3 -c "from process_bluesky.core.state_manager import StateM
      └─→ [DiscordEbilogService] →  [Discord Webhook]
 
 [DiscordNotifier]  →  [Discord Webhook（エラー通知用）]
+
+[X API: 本人ポスト / Owned Read]
+     │
+     ├─→ [XMirror] → [BlueSkyOutputService] → BlueSky
+     └─→ [XRecent CLI] → JSON / Markdown → note・YouTube企画
 ```
 
 ### ディレクトリ構成
@@ -83,7 +97,9 @@ process_bluesky/
 │   │   ├── discord_notifier.py        # エラー通知用Discord
 │   │   ├── base_input_service.py      # InputService 抽象基底
 │   │   └── base_output_service.py     # OutputService 抽象基底
-│   └── main.py                   # エントリポイント・メインループ
+│   ├── main.py                   # BlueSky→Discord エントリポイント
+│   ├── x_mirror.py               # X→BlueSky エントリポイント
+│   └── x_recent.py               # X本人ポストの読み取り専用エクスポート
 ├── tests/                        # pytest テスト群
 ├── data/                         # state.json（実行時データ、gitignore済み）
 ├── Dockerfile
@@ -104,6 +120,10 @@ process_bluesky/
 | `DISCORD_LOG_WEBHOOK_URL` | ✅ | ミラー先のDiscord Webhook（唯一の出力先） |
 | `POLLING_INTERVAL` | - | ポーリング間隔（秒、デフォルト: 60） |
 | `SKIP_POST_IDS` | - | スキップするBlueSkyポストID（カンマ区切り、デバッグ用） |
+| `X_USER_ID` / `X_SCREEN_NAME` | X入力時 | 本人のXユーザーIDとscreen name |
+| `X_CLIENT_ID` / `X_CLIENT_SECRET` | X入力時 | OAuth 2.0アプリ資格情報 |
+| `X_ACCESS_TOKEN` / `X_REFRESH_TOKEN` | X入力時 | 本人のユーザーコンテキストtoken pair |
+| `X_ENV_FILE` | Xミラー時 | token更新を書き戻すdotenvの絶対パス |
 
 ---
 
