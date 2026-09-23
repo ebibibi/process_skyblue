@@ -103,7 +103,21 @@ PYTHONPATH=src python3 -m process_bluesky.x_recent \
 
 The command only calls `GET /2/users/{id}/tweets`; it never posts, likes, follows, or deletes. Use OAuth user-context tokens for the developer app owner so X classifies the requests as lower-cost Owned Reads. JSON is the default format for machine consumers.
 
-### 6. Schedule repeated execution
+### 6. Mirror new X posts to Discord (optional)
+
+Use the same X OAuth credentials and owned-read endpoint as `x_recent`; no X write API is used. The first successful run records the newest post as a baseline without sending old posts. Later runs send up to 15 new posts in chronological order, retaining the cursor per successful Discord send. Discord posting uses an existing bot token with permission to send messages to the target channel. Run once per day **after** `x_recent` in the same UTC day to reuse X's 24-hour resource deduplication; additional unique posts or reads across UTC days can still incur X Owned Read charges, so zero incremental X cost is not guaranteed.
+
+```bash
+PYTHONPATH=src python3 -m process_bluesky.x_discord \
+  --env-file /absolute/path/to/x.env \
+  --bot-env-file /absolute/path/to/bot.env \
+  --channel-id CHANNEL_ID \
+  --state-file /absolute/path/to/data/x_discord_state.json
+```
+
+The bot env file must provide `DISCORD_BOT_TOKEN`. Keep both credentials and the state file out of version control. Discord mentions are disabled for forwarded text.
+
+### 7. Schedule repeated execution
 
 The process exits after each check. Use your preferred scheduler to call it every 60 seconds:
 
