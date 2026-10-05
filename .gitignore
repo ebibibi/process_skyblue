@@ -6,15 +6,15 @@
 .coverage
 pytest.ini
 
-# Runtime state
-data/state.json
+# Runtime state (state JSON, sqlite DB, mirror state)
+data/
 
 # Secrets - NEVER commit this file
 .env
+.env.bak*
 
 # Editor and OS
 .DS_Store
 .vscode/
 *.swp
 
-data/*.db
