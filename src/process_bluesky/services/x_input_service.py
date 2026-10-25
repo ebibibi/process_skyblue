@@ -136,17 +136,24 @@ class XInputService(BaseInputService):
         payload = self._get(f"{API_BASE}/usage/credits")
         return float(payload["data"]["total_balance"])
 
-    def get_latest_posts(self, since_timestamp: Optional[str] = None) -> list[dict[str, Any]]:
+    def get_latest_posts(
+        self, since_timestamp: Optional[str] = None, since_id: Optional[str] = None
+    ) -> list[dict[str, Any]]:
         """Return the user's recent posts, newest first, in the common format.
 
         ``since_timestamp`` is part of the BaseInputService contract but X
-        filters by post id, not time. The caller filters against the watermark.
+        filters by post id, not time. Pass ``since_id`` (the caller's watermark)
+        so X returns, and bills, only newer posts: owned-read charges are
+        deduplicated per UTC day, so re-reading the latest 50 every day costs
+        50 posts a day even when nothing new was posted.
         """
         params = {
             "max_results": 50,
             "tweet.fields": TWEET_FIELDS,
             "exclude": "retweets",
         }
+        if since_id is not None:
+            params["since_id"] = since_id
         payload = self._get(f"{API_BASE}/users/{self.user_id}/tweets", params=params)
         return [self._to_common(item) for item in payload.get("data", [])]
 
