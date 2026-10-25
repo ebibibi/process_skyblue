@@ -106,7 +106,7 @@ def run(argv: Sequence[str] | None = None) -> int:
         json.loads(state_file.read_text(encoding="utf-8"))["watermark"]
         if state_file.exists() else None
     )
-    posts = service.get_latest_posts()
+    posts = service.get_latest_posts(since_id=watermark)
     if not posts:
         logger.info("No X posts returned; leaving cursor unchanged")
         return 0
