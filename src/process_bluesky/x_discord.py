@@ -10,6 +10,7 @@ import json
 import logging
 import os
 import tempfile
+import time
 from pathlib import Path
 from typing import Any, Sequence
 
@@ -23,6 +24,8 @@ from process_bluesky.x_mirror import persist_tokens
 logger = logging.getLogger(__name__)
 MAX_POSTS_PER_RUN = 15
 MAX_MESSAGE_LENGTH = 2000
+RATE_LIMIT_RETRIES = 3
+MAX_RATE_LIMIT_WAIT_SECONDS = 30.0
 
 
 def select_posts(posts: Sequence[dict[str, Any]], watermark: str | None) -> list[dict[str, Any]]:
@@ -63,14 +66,32 @@ def message_for(post: dict[str, Any], screen_name: str) -> str:
     return header + text + suffix
 
 
+def _retry_after_seconds(response: requests.Response) -> float:
+    try:
+        seconds = float(response.json().get("retry_after", 1.0))
+    except (ValueError, AttributeError):
+        seconds = float(response.headers.get("Retry-After", 1.0))
+    return min(max(seconds, 0.0), MAX_RATE_LIMIT_WAIT_SECONDS)
+
+
 def send_post(token: str, channel_id: str, message: str) -> None:
-    """Discord Bot API: only a confirmed success advances the cursor."""
-    response = requests.post(
-        f"https://discord.com/api/v10/channels/{channel_id}/messages",
-        headers={"Authorization": f"Bot {token}"},
-        json={"content": message, "allowed_mentions": {"parse": []}},
-        timeout=20,
-    )
+    """Discord Bot API: only a confirmed success advances the cursor.
+
+    Draining a backlog sends many messages in a row, so Discord may answer
+    429. Wait for its ``retry_after`` and resend the same message.
+    """
+    for attempt in range(RATE_LIMIT_RETRIES + 1):
+        response = requests.post(
+            f"https://discord.com/api/v10/channels/{channel_id}/messages",
+            headers={"Authorization": f"Bot {token}"},
+            json={"content": message, "allowed_mentions": {"parse": []}},
+            timeout=20,
+        )
+        if response.status_code != 429 or attempt == RATE_LIMIT_RETRIES:
+            break
+        wait = _retry_after_seconds(response)
+        logger.warning("Discord rate limited; retrying in %.1fs", wait)
+        time.sleep(wait)
     response.raise_for_status()
 
 

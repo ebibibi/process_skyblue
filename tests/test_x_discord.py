@@ -162,3 +162,36 @@ def test_run_stops_when_gap_exceeds_page_cap(tmp_path: Path) -> None:
             x_discord.run(args)
     send.assert_not_called()
     assert json.loads(state.read_text())["watermark"] == "7"
+
+
+def _response(status: int, body: dict | None = None):
+    from unittest.mock import MagicMock
+
+    response = MagicMock()
+    response.status_code = status
+    response.json.return_value = body or {}
+    response.headers = {}
+    if status >= 400:
+        response.raise_for_status.side_effect = RuntimeError(f"HTTP {status}")
+    return response
+
+
+def test_send_waits_and_retries_on_rate_limit() -> None:
+    with patch("process_bluesky.x_discord.requests.post") as send, patch(
+        "process_bluesky.x_discord.time.sleep"
+    ) as sleep:
+        send.side_effect = [_response(429, {"retry_after": 2.5}), _response(200)]
+        x_discord.send_post("fake-token", "123", "hello")
+    assert send.call_count == 2
+    sleep.assert_called_once_with(2.5)
+
+
+def test_send_gives_up_after_retry_limit() -> None:
+    with patch("process_bluesky.x_discord.requests.post") as send, patch(
+        "process_bluesky.x_discord.time.sleep"
+    ) as sleep:
+        send.return_value = _response(429, {"retry_after": 999})
+        with pytest.raises(RuntimeError, match="429"):
+            x_discord.send_post("fake-token", "123", "hello")
+    assert send.call_count == x_discord.RATE_LIMIT_RETRIES + 1
+    assert all(c.args[0] == x_discord.MAX_RATE_LIMIT_WAIT_SECONDS for c in sleep.call_args_list)
