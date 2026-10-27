@@ -157,6 +157,32 @@ class XInputService(BaseInputService):
         payload = self._get(f"{API_BASE}/users/{self.user_id}/tweets", params=params)
         return [self._to_common(item) for item in payload.get("data", [])]
 
+    def get_posts_since(
+        self, since_id: str, max_pages: int = 5
+    ) -> tuple[list[dict[str, Any]], bool]:
+        """Return every post newer than ``since_id``, newest first.
+
+        Follows ``next_token`` so a gap longer than one page (for example after
+        the job was down for days) is fetched whole. The second value is False
+        when ``max_pages`` ran out while X still had more pages, i.e. posts may
+        be missing and the caller should not advance blindly.
+        """
+        params: dict[str, Any] = {
+            "max_results": 100,
+            "tweet.fields": TWEET_FIELDS,
+            "exclude": "retweets",
+            "since_id": since_id,
+        }
+        posts: list[dict[str, Any]] = []
+        for _ in range(max_pages):
+            payload = self._get(f"{API_BASE}/users/{self.user_id}/tweets", params=params)
+            posts.extend(self._to_common(item) for item in payload.get("data", []))
+            next_token = payload.get("meta", {}).get("next_token")
+            if not next_token:
+                return posts, True
+            params = {**params, "pagination_token": next_token}
+        return posts, False
+
     @staticmethod
     def _to_common(tweet: dict[str, Any]) -> dict[str, Any]:
         referenced = tweet.get("referenced_tweets") or []
