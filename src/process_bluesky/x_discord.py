@@ -106,21 +106,27 @@ def run(argv: Sequence[str] | None = None) -> int:
         json.loads(state_file.read_text(encoding="utf-8"))["watermark"]
         if state_file.exists() else None
     )
-    posts = service.get_latest_posts(since_id=watermark)
-    if not posts:
-        logger.info("No X posts returned; leaving cursor unchanged")
-        return 0
     if watermark is None:
+        posts = service.get_latest_posts()
+        if not posts:
+            logger.info("No X posts returned; leaving cursor unchanged")
+            return 0
         newest_id = max(posts, key=lambda post: int(post["id"]))["id"]
         save_watermark(state_file, newest_id)
         logger.info("Initial baseline: %s (no historical posts forwarded)", newest_id)
         return 0
 
-    # The owned-read endpoint returns only 50 posts. If even the oldest is
-    # newer than our cursor, some posts may be missing: stop rather than
-    # silently pretending the feed is complete.
-    if len(posts) == 50 and min(int(post["id"]) for post in posts) > int(watermark):
-        raise RuntimeError("X returned 50 posts newer than cursor; manual gap review required")
+    # Page through the whole gap so a backlog longer than one page (after an
+    # outage) is still forwarded in order. If the page cap runs out, some
+    # posts may be missing: stop rather than silently skipping them.
+    posts, complete = service.get_posts_since(watermark)
+    if not complete:
+        raise RuntimeError(
+            "X has more posts newer than cursor than the page cap; manual gap review required"
+        )
+    if not posts:
+        logger.info("No new X posts; leaving cursor unchanged")
+        return 0
 
     batch = select_posts(posts, watermark)
     for post in batch:
