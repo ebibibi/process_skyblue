@@ -38,13 +38,35 @@ def select_posts(posts: Sequence[dict[str, Any]], watermark: str | None) -> list
     )[:MAX_POSTS_PER_RUN]
 
 
-def save_watermark(path: Path, post_id: str) -> None:
+def load_state(path: Path) -> dict[str, str]:
+    """Return the saved cursor (and pinned channel), or an empty state."""
+    if not path.exists():
+        return {}
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def check_channel(state: dict[str, str], channel_id: str) -> None:
+    """Refuse to continue a cursor into a different channel than it was built for.
+
+    A manual run with a stale ``--channel-id`` would otherwise advance the
+    shared cursor while posting elsewhere, and the scheduled job could never
+    resend those posts to the right channel.
+    """
+    pinned = state.get("channel_id")
+    if pinned is not None and pinned != channel_id:
+        raise RuntimeError(
+            f"State file is pinned to channel {pinned}, not {channel_id}; "
+            "use the scheduled job's channel or a separate state file"
+        )
+
+
+def save_watermark(path: Path, post_id: str, channel_id: str) -> None:
     """Atomically persist the latest delivered post (or initial baseline)."""
     path.parent.mkdir(parents=True, exist_ok=True)
     fd, name = tempfile.mkstemp(dir=path.parent, suffix=".tmp")
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as output:
-            json.dump({"watermark": post_id}, output)
+            json.dump({"watermark": post_id, "channel_id": channel_id}, output)
             output.flush()
             os.fsync(output.fileno())
         os.replace(name, path)
@@ -110,6 +132,9 @@ def run(argv: Sequence[str] | None = None) -> int:
     bot_path = Path(args.bot_env_file).expanduser().resolve()
     # Do not load every variable from the bot env file (it also contains
     # unrelated secrets). dotenv_values returns the token without exporting it.
+    state_file = Path(args.state_file)
+    state = load_state(state_file)
+    check_channel(state, args.channel_id)
     token = dotenv_values(bot_path).get("DISCORD_BOT_TOKEN")
     if not token:
         raise RuntimeError("DISCORD_BOT_TOKEN is missing")
@@ -122,18 +147,14 @@ def run(argv: Sequence[str] | None = None) -> int:
         client_secret=os.environ["X_CLIENT_SECRET"],
         token_persister=persist_tokens(str(env_path)),
     )
-    state_file = Path(args.state_file)
-    watermark = (
-        json.loads(state_file.read_text(encoding="utf-8"))["watermark"]
-        if state_file.exists() else None
-    )
+    watermark = state.get("watermark")
     if watermark is None:
         posts = service.get_latest_posts()
         if not posts:
             logger.info("No X posts returned; leaving cursor unchanged")
             return 0
         newest_id = max(posts, key=lambda post: int(post["id"]))["id"]
-        save_watermark(state_file, newest_id)
+        save_watermark(state_file, newest_id, args.channel_id)
         logger.info("Initial baseline: %s (no historical posts forwarded)", newest_id)
         return 0
 
@@ -152,7 +173,7 @@ def run(argv: Sequence[str] | None = None) -> int:
     batch = select_posts(posts, watermark)
     for post in batch:
         send_post(token, args.channel_id, message_for(post, screen_name))
-        save_watermark(state_file, post["id"])
+        save_watermark(state_file, post["id"], args.channel_id)
         logger.info("Sent X post %s to Discord", post["id"])
     if len(batch) == MAX_POSTS_PER_RUN:
         logger.warning("Batch limit reached; remaining posts will be sent next run")

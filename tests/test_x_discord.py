@@ -164,6 +164,49 @@ def test_run_stops_when_gap_exceeds_page_cap(tmp_path: Path) -> None:
     assert json.loads(state.read_text())["watermark"] == "7"
 
 
+def test_run_refuses_a_channel_other_than_the_pinned_one(tmp_path: Path) -> None:
+    env = tmp_path / "x.env"
+    env.write_text("\n".join(f"{key}=test" for key in (
+        "X_SCREEN_NAME", "X_USER_ID", "X_ACCESS_TOKEN", "X_REFRESH_TOKEN",
+        "X_CLIENT_ID", "X_CLIENT_SECRET",
+    )), encoding="utf-8")
+    bot = tmp_path / "bot.env"
+    bot.write_text("DISCORD_BOT_TOKEN=test\n", encoding="utf-8")
+    state = tmp_path / "state.json"
+    state.write_text(json.dumps({"watermark": "7", "channel_id": "123"}), encoding="utf-8")
+    args = ["--env-file", str(env), "--bot-env-file", str(bot),
+            "--channel-id", "456", "--state-file", str(state)]
+    with patch.object(x_discord, "XInputService") as service, patch.object(
+        x_discord, "send_post"
+    ) as send:
+        with pytest.raises(RuntimeError, match="pinned to channel 123"):
+            x_discord.run(args)
+    service.assert_not_called()
+    send.assert_not_called()
+    assert json.loads(state.read_text()) == {"watermark": "7", "channel_id": "123"}
+
+
+def test_run_pins_legacy_state_to_current_channel(tmp_path: Path) -> None:
+    env = tmp_path / "x.env"
+    env.write_text("\n".join(f"{key}=test" for key in (
+        "X_SCREEN_NAME", "X_USER_ID", "X_ACCESS_TOKEN", "X_REFRESH_TOKEN",
+        "X_CLIENT_ID", "X_CLIENT_SECRET",
+    )), encoding="utf-8")
+    bot = tmp_path / "bot.env"
+    bot.write_text("DISCORD_BOT_TOKEN=test\n", encoding="utf-8")
+    state = tmp_path / "state.json"
+    state.write_text(json.dumps({"watermark": "7"}), encoding="utf-8")
+    args = ["--env-file", str(env), "--bot-env-file", str(bot),
+            "--channel-id", "123", "--state-file", str(state)]
+    with patch.object(x_discord, "XInputService") as service, patch.object(
+        x_discord, "send_post"
+    ) as send:
+        service.return_value.get_posts_since.return_value = ([post(8)], True)
+        assert x_discord.run(args) == 0
+    send.assert_called_once()
+    assert json.loads(state.read_text()) == {"watermark": "8", "channel_id": "123"}
+
+
 def _response(status: int, body: dict | None = None):
     from unittest.mock import MagicMock
 
