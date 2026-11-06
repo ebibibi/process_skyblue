@@ -2,6 +2,10 @@
 
 The first successful read sets a baseline without reposting history. Keep the
 Discord cursor independent of the X → BlueSky cursor and never call X's write API.
+
+With ``--queue-api-url``, the same read also resolves queued posts in the Console
+(see x_queue.py). That has its own cursor: an unreachable Console must not hold up
+the mirror, and the posts it missed are read again once it is back.
 """
 from __future__ import annotations
 
@@ -20,6 +24,7 @@ from dotenv import dotenv_values, load_dotenv
 from process_bluesky.services.x_input_service import XInputService
 from process_bluesky.services.x_text import expand_urls, post_url
 from process_bluesky.x_mirror import persist_tokens
+from process_bluesky.x_queue import report_posts
 
 logger = logging.getLogger(__name__)
 MAX_POSTS_PER_RUN = 15
@@ -62,11 +67,16 @@ def check_channel(state: dict[str, str], channel_id: str) -> None:
 
 def save_watermark(path: Path, post_id: str, channel_id: str) -> None:
     """Atomically persist the latest delivered post (or initial baseline)."""
+    write_state(path, {"watermark": post_id, "channel_id": channel_id})
+
+
+def write_state(path: Path, state: dict[str, str]) -> None:
+    """Replace a state file in one step, so a crash cannot leave half a cursor."""
     path.parent.mkdir(parents=True, exist_ok=True)
     fd, name = tempfile.mkstemp(dir=path.parent, suffix=".tmp")
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as output:
-            json.dump({"watermark": post_id, "channel_id": channel_id}, output)
+            json.dump(state, output)
             output.flush()
             os.fsync(output.fileno())
         os.replace(name, path)
@@ -117,13 +127,36 @@ def send_post(token: str, channel_id: str, message: str) -> None:
     response.raise_for_status()
 
 
+def queue_baseline(state_file: Path, watermark: str) -> str:
+    """The queue's cursor, saved on first use: left implicit it would follow the mirror's."""
+    cursor = load_state(state_file).get("watermark")
+    if cursor is None:
+        write_state(state_file, {"watermark": watermark})
+        return watermark
+    return cursor
+
+
+def report_to_queue(
+    api_url: str, state_file: Path, posts: Sequence[dict[str, Any]], cursor: str, screen_name: str
+) -> None:
+    """Report the posts after *cursor* to the queue; advance only if it took them."""
+    unseen = [post for post in posts if int(post["id"]) > int(cursor)]
+    if unseen and report_posts(api_url, unseen, screen_name):
+        newest = max(unseen, key=lambda post: int(post["id"]))["id"]
+        write_state(state_file, {"watermark": newest})
+
+
 def run(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--env-file", required=True)
     parser.add_argument("--bot-env-file", required=True)
     parser.add_argument("--channel-id", required=True)
     parser.add_argument("--state-file", required=True)
+    parser.add_argument("--queue-api-url", help="Relay API that holds the queue of posts to send")
+    parser.add_argument("--queue-state-file", help="Cursor of the posts reported to the queue")
     args = parser.parse_args(argv)
+    if bool(args.queue_api_url) != bool(args.queue_state_file):
+        parser.error("--queue-api-url and --queue-state-file go together")
     if not args.channel_id.isdecimal():
         parser.error("channel-id must be a Discord snowflake")
 
@@ -161,11 +194,15 @@ def run(argv: Sequence[str] | None = None) -> int:
     # Page through the whole gap so a backlog longer than one page (after an
     # outage) is still forwarded in order. If the page cap runs out, some
     # posts may be missing: stop rather than silently skipping them.
-    posts, complete = service.get_posts_since(watermark)
+    queue_state = Path(args.queue_state_file) if args.queue_state_file else None
+    queue_cursor = queue_baseline(queue_state, watermark) if queue_state else watermark
+    posts, complete = service.get_posts_since(min(watermark, queue_cursor, key=int))
     if not complete:
         raise RuntimeError(
             "X has more posts newer than cursor than the page cap; manual gap review required"
         )
+    if queue_state is not None:
+        report_to_queue(args.queue_api_url, queue_state, posts, queue_cursor, screen_name)
     if not posts:
         logger.info("No new X posts; leaving cursor unchanged")
         return 0
