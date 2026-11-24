@@ -14,8 +14,9 @@ LINK = "https://youtu.be/abc"
 QUEUED = f"Hyper-Vの検証環境、AIが6回転んでコマンド1行に\n{LINK}\n#HyperV #ClaudeCode"
 
 
-def item(key: str = "a", body: str = QUEUED, created_at: str = "2026-11-06T00:00:00Z") -> dict:
-    return {"key": key, "body": body, "created_at": created_at}
+def item(key: str = "a", body: str = QUEUED, created_at: str = "2026-11-06T00:00:00Z",
+         url: str = "https://x.com/intent/post?text=abc") -> dict:
+    return {"key": key, "body": body, "created_at": created_at, "url": url}
 
 
 def post(identifier: int, text: str, timestamp: str = "2026-11-06T01:00:00.000Z", urls=()) -> dict:
@@ -96,12 +97,30 @@ def test_report_resolves_the_item_with_a_link_to_the_post() -> None:
         x_queue.requests, "patch", return_value=_response(200)
     ) as resolve:
         assert x_queue.report_posts("http://relay/", [posted], "owner") is True
-    assert resolve.call_args.args[0] == "http://relay/api/pages/x-posts/items/k%3A1"
+    assert resolve.call_args.args[0] == "http://relay/api/pages/distribute/items/k%3A1"
     assert resolve.call_args.kwargs["json"] == {
         "state": "done",
         "resolved_by": "x-post-watch",
         "result_url": "https://x.com/owner/status/42",
     }
+
+
+def test_only_the_x_rows_of_the_shared_page_are_resolved() -> None:
+    """The page holds every network's rows; the same text queued for Threads is not this X post."""
+    posted = short_link_post(42, "Hyper-Vの検証環境、AIが6回転んでコマンド1行に\n#HyperV #ClaudeCode")
+    rows = [item("threads-1", url="https://www.threads.com/intent/post?text=abc"),
+            item("ig-1", url="https://www.instagram.com/"), item("no-link", url="")]
+    with patch.object(x_queue.requests, "get", return_value=_response(200, {"items": rows})), patch.object(
+        x_queue.requests, "patch", return_value=_response(200)
+    ) as resolve:
+        assert x_queue.report_posts("http://relay", [posted], "owner") is True
+    resolve.assert_not_called()
+
+
+@pytest.mark.parametrize("url", ["https://x.com/intent/post", "https://twitter.com/intent/tweet?text=a",
+                                 "https://www.x.com/intent/post?text=a"])
+def test_a_row_opening_x_is_an_x_row(url: str) -> None:
+    assert x_queue.is_x_row({"url": url})
 
 
 def test_report_treats_a_page_that_does_not_exist_yet_as_nothing_queued() -> None:

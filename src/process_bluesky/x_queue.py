@@ -4,6 +4,9 @@ X has no affordable write API, so posts are sent by a person from a queue in the
 reader already sees every post the account makes, so it can finish the queue's bookkeeping: a post
 that matches a queued text resolves that item with a link to the post.
 
+The queue is one page for every network, with one card per piece of content and a row per network.
+Only the rows that open X's compose screen are X rows; the others are never compared.
+
 A person often edits the text in the compose box, so an exact comparison would miss the very posts
 that were worked on most. The text is compared by similarity, and much less strictly when the post
 carries the same link as the queued text.
@@ -16,7 +19,7 @@ import re
 import unicodedata
 from difflib import SequenceMatcher
 from typing import Any, Sequence
-from urllib.parse import quote, unquote
+from urllib.parse import quote, unquote, urlparse
 
 import requests
 
@@ -24,7 +27,8 @@ from process_bluesky.services.x_text import URL_PATTERN, expand_urls, post_url
 
 logger = logging.getLogger(__name__)
 
-PAGE_SLUG = "x-posts"
+PAGE_SLUG = "distribute"
+X_HOSTS = frozenset({"x.com", "twitter.com"})
 RESOLVER = "x-post-watch"
 TIMEOUT_SECONDS = 15
 OPEN_ITEMS_LIMIT = 1000
@@ -60,6 +64,12 @@ def posted_text(post: dict[str, Any]) -> str:
     """The post's text with t.co links expanded, as the queued text was written."""
     metadata = post.get("metadata") or {}
     return expand_urls(post.get("content", ""), metadata.get("urls") or [])
+
+
+def is_x_row(item: dict[str, Any]) -> bool:
+    """A row a person posts on X: its link opens X's compose screen."""
+    host = (urlparse(item.get("url") or "").hostname or "").lower().removeprefix("www.")
+    return host in X_HOSTS
 
 
 def find_matches(
@@ -103,7 +113,8 @@ def report_posts(api_url: str, posts: Sequence[dict[str, Any]], screen_name: str
         if listed.status_code == 404:
             return True
         listed.raise_for_status()
-        for item, post in find_matches(listed.json()["items"], posts):
+        rows = [item for item in listed.json()["items"] if is_x_row(item)]
+        for item, post in find_matches(rows, posts):
             resolved = requests.patch(
                 f"{page}/{quote(item['key'], safe='')}",
                 json={
